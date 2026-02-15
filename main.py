@@ -10,7 +10,7 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=lo
 
 app_web = Flask('')
 @app_web.route('/')
-def home(): return "Dragon VPN Bot v32.0 - Fixed", 200
+def home(): return "Dragon VPN Bot v33.0 - Test Fixed", 200
 
 def run_web():
     port = int(os.environ.get('PORT', 8080))
@@ -31,7 +31,7 @@ def load_db():
             "welcome": "🐉 به ربات {brand} خوش آمدید\nامنیت و سرعت را با ما تجربه کنید.",
             "support": "🆘 <b>پشتیبانی {brand}</b>\n🆔 @Support_Admin",
             "guide": "📚 <b>آموزش اتصال</b>\n🆔 @Guide_Channel",
-            "test": "🚀 درخواست تست شما ثبت شد. به زودی ارسال می‌شود."
+            "test": "🚀 درخواست تست رایگان شما ثبت شد.\nپس از بررسی ادمین، اکانت تست برای شما ارسال می‌شود."
         }
     }
 
@@ -63,19 +63,33 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text: return
     text = update.message.text
     uid = update.effective_user.id
+    u_name = update.effective_user.first_name
     step = user_data.get(uid, {}).get('step')
 
     if text in ['❌ انصراف و بازگشت', 'بازگشت به منوی اصلی']:
         user_data[uid] = {}
         await start(update, context); return
 
-    # --- اصلاح بخش سرویس‌های من ---
     if text == 'سرویس‌های من':
         purchases = db["users"].get(str(uid), {}).get("purchases", [])
         if not purchases:
             await update.message.reply_text("❌ شما هنوز هیچ اشتراکی خریداری نکرده‌اید."); return
         msg = "📂 <b>لیست سرویس‌های شما:</b>\n\n" + "\n".join(purchases)
         await update.message.reply_text(msg, parse_mode='HTML'); return
+
+    # --- اصلاح شده: بخش تست رایگان ---
+    if text == 'تست رایگان':
+        # پیام به کاربر
+        await update.message.reply_text(db["texts"]["test"])
+        # اعلان فوری به ادمین
+        admin_alert = (f"🎁 <b>درخواست تست رایگان جدید</b>\n"
+                       f"━━━━━━━━━━━━━━━\n"
+                       f"👤 کاربر: {u_name}\n"
+                       f"🆔 آیدی عددی: <code>{uid}</code>\n"
+                       f"━━━━━━━━━━━━━━━\n"
+                       f"لطفاً اکانت تست را برای ایشان ارسال کنید.")
+        await context.bot.send_message(ADMIN_ID, admin_alert, parse_mode='HTML')
+        return
 
     # --- مدیریت ---
     if int(uid) == ADMIN_ID:
@@ -85,15 +99,9 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if text == 'ویرایش متن‌ها':
             kb = [['ویرایش متن پشتیبانی', 'ویرایش متن راهنما'], ['ویرایش متن تست', 'ویرایش خوش‌آمدگویی'], ['❌ انصراف و بازگشت']]
-            await update.message.reply_text("کدام متن را تغییر می‌دهید؟", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)); return
+            await update.message.reply_text("انتخاب بخش:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)); return
 
-        # --- اصلاح بخش ویرایش متن‌ها ---
-        maps = {
-            'ویرایش متن پشتیبانی': 'et_support',
-            'ویرایش متن راهنما': 'et_guide',
-            'ویرایش خوش‌آمدگویی': 'et_welcome',
-            'ویرایش متن تست': 'et_test'
-        }
+        maps = {'ویرایش متن پشتیبانی': 'et_support', 'ویرایش متن راهنما': 'et_guide', 'ویرایش خوش‌آمدگویی': 'et_welcome', 'ویرایش متن تست': 'et_test'}
         if text in maps:
             user_data[uid]['step'] = maps[text]
             await update.message.reply_text(f"📝 متن جدید برای '{text}' را ارسال کنید:", reply_markup=BACK_KB); return
@@ -102,9 +110,8 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             key = step.replace('et_', '')
             db["texts"][key] = text
             save_db(db); user_data[uid] = {}
-            await update.message.reply_text("✅ متن با موفقیت آپدیت شد.", reply_markup=get_main_menu(uid)); return
+            await update.message.reply_text("✅ متن آپدیت شد.", reply_markup=get_main_menu(uid)); return
 
-        # بقیه بخش‌های مدیریت (که درست کار می‌کردند)
         if text == 'ویرایش برند':
             user_data[uid]['step'] = 'ed_brand'
             await update.message.reply_text("نام برند جدید:", reply_markup=BACK_KB); return
@@ -143,11 +150,9 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
                    f"🟢 اگر لینک اضافه نشد از ربات @URLExtractor_Bot استفاده کنید.")
             kb = InlineKeyboardMarkup([[InlineKeyboardButton("📚 آموزش اتصال", url="https://t.me/Guide_Channel")]])
             await context.bot.send_message(target, msg, parse_mode='HTML', reply_markup=kb)
-            # ثبت در سرویس‌های من
-            if str(target) not in db["users"]: db["users"][str(target)] = {"purchases": []}
             db["users"][str(target)]["purchases"].append(f"🚀 {vol} | {v_name}")
             save_db(db)
-            await update.message.reply_text("✅ برای کاربر ارسال و در سوابق ثبت شد.", reply_markup=get_main_menu(uid))
+            await update.message.reply_text("✅ ارسال شد.", reply_markup=get_main_menu(uid))
             user_data[uid] = {}; return
 
     # --- کاربر ---
@@ -164,13 +169,12 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         plan = user_data[uid]['plan']
         price = plan['price'] * 1000
         user_data[uid].update({'step': 'WAIT_PHOTO', 'vpn_name': text, 'price': price, 'vol': plan['only_vol']})
-        inv = (f"💎 <b>پیش‌فاکتور خرید سرویس</b>\n➖➖➖➖➖➖➖➖➖➖\n👤 نام اکانت: <code>{text}</code>\n📦 نوع پلن: <b>{plan['name']}</b>\n💰 مبلغ نهایی: <b>{price:,} تومان</b>\n➖➖➖➖➖➖➖➖➖➖")
-        await update.message.reply_text(inv, parse_mode='HTML', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ تایید و دریافت کارت", callback_data="show_card")]]))
+        inv = (f"💎 <b>پیش‌فاکتور خرید</b>\n➖➖➖➖➖➖➖➖➖➖\n👤 نام اکانت: <code>{text}</code>\n📦 پلن: <b>{plan['name']}</b>\n💰 مبلغ: <b>{price:,} تومان</b>\n➖➖➖➖➖➖➖➖➖➖")
+        await update.message.reply_text(inv, parse_mode='HTML', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ دریافت شماره کارت", callback_data="show_card")]]))
         return
 
     if text == 'پشتیبانی': await update.message.reply_text(db["texts"]["support"], parse_mode='HTML'); return
     if text == 'راهنمای اتصال': await update.message.reply_text(db["texts"]["guide"], parse_mode='HTML'); return
-    if text == 'تست رایگان': await update.message.reply_text(db["texts"]["test"]); return
 
 async def handle_call(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; uid = query.from_user.id; await query.answer()
@@ -181,7 +185,7 @@ async def handle_call(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("📝 نام اکانت را بفرستید:", reply_markup=BACK_KB)
     elif query.data == "show_card":
         p = user_data[uid].get('price', 0)
-        card_msg = (f"💳 <b>اطلاعات واریز وجه</b>\n➖➖➖➖➖➖➖➖➖➖\n💰 مبلغ: <b>{p:,} تومان</b>\n\n📍 شماره کارت:\n<code>{db['card']['number']}</code>\n\n👤 بنام: <b>{db['card']['name']}</b>\n➖➖➖➖➖➖➖➖➖➖")
+        card_msg = (f"💳 <b>اطلاعات واریز</b>\n➖➖➖➖➖➖➖➖➖➖\n💰 مبلغ: <b>{p:,} تومان</b>\n\n📍 شماره کارت:\n<code>{db['card']['number']}</code>\n\n👤 بنام: <b>{db['card']['name']}</b>\n➖➖➖➖➖➖➖➖➖➖")
         await query.message.reply_text(card_msg, parse_mode='HTML', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📤 ارسال فیش", callback_data="get_photo")]]))
     elif query.data == "get_photo":
         user_data[uid]['step'] = 'WAIT_PHOTO'; await query.message.reply_text("📸 فیش را بفرستید:")
@@ -194,8 +198,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if user_data.get(uid, {}).get('step') == 'WAIT_PHOTO':
         v_name = user_data[uid].get('vpn_name', 'Amir'); v_vol = user_data[uid].get('vol', '20GB')
-        caption = f"💰 فیش جدید\n👤 آیدی: {uid}\n📝 نام: {v_name}\n📦 پلن: {v_vol}"
-        btn = [[InlineKeyboardButton("✅ تایید و ارسال کانفیگ", callback_data=f"adm_send_{uid}_{v_name}_{v_vol}")]]
+        caption = f"💰 فیش جدید\n👤 نام: {v_name}\n آیدی: {uid}"
+        btn = [[InlineKeyboardButton("✅ تایید و ارسال", callback_data=f"adm_send_{uid}_{v_name}_{v_vol}")]]
         await context.bot.send_photo(ADMIN_ID, update.message.photo[-1].file_id, caption=caption, reply_markup=InlineKeyboardMarkup(btn))
         await update.message.reply_text("✅ فیش ارسال شد.", reply_markup=get_main_menu(uid))
         user_data[uid] = {}
