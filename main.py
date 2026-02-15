@@ -10,7 +10,7 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=lo
 
 app_web = Flask('')
 @app_web.route('/')
-def home(): return "Dragon VPN is Online!", 200
+def home(): return "Dragon VPN Online!", 200
 
 def run_web():
     port = int(os.environ.get('PORT', 8080))
@@ -26,12 +26,7 @@ def load_db():
         try:
             with open(DB_FILE, 'r', encoding='utf-8') as f: return json.load(f)
         except: pass
-    return {
-        "users": {}, 
-        "card": {"number": "6277601368776066", "name": "رضوانی"}, 
-        "categories": {"ارزان و به صرفه": [], "قوی": []},
-        "base_price": 50000 # قیمت هر ۱۰ گیگ یک ماهه به تومان
-    }
+    return {"users": {}, "card": {"number": "6277601368776066", "name": "رضوانی"}, "categories": {"ارزان و به صرفه": [], "قوی": []}, "base_price": 50000}
 
 def save_db(data):
     with open(DB_FILE, 'w', encoding='utf-8') as f:
@@ -70,104 +65,86 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if uid_int == ADMIN_ID:
         if text == '⚙️ مدیریت ربات':
             kb = [['افزودن پلن', 'حذف/ویرایش پلن'], ['ویرایش کارت', '⚙️ تنظیم قیمت واحد'], ['پیام همگانی', 'بازگشت به منوی اصلی']]
-            await update.message.reply_text("🛠 مدیریت ربات:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+            await update.message.reply_text("🛠 مدیریت:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
             return
         elif text == '⚙️ تنظیم قیمت واحد':
             state[uid] = 'set_base_price'
-            await update.message.reply_text("قیمت هر 10 گیگ (یک ماهه) را به تومان وارد کنید (مثلا 50000):")
+            await update.message.reply_text("قیمت هر 10 گیگ (یک ماهه) را به تومان وارد کنید:")
             return
         elif state.get(uid) == 'set_base_price':
             try:
-                db["base_price"] = int(text)
-                save_db(db); state[uid] = None
-                await update.message.reply_text(f"✅ قیمت پایه تنظیم شد: {text} تومان", reply_markup=get_main_menu(uid))
-            except: await update.message.reply_text("فقط عدد بفرستید.")
+                db["base_price"] = int(text); save_db(db); state[uid] = None
+                await update.message.reply_text(f"✅ تنظیم شد: {text} تومان", reply_markup=get_main_menu(uid))
+            except: await update.message.reply_text("عدد بفرستید.")
             return
 
     # --- کاربر ---
-    # تمدید سرویس فعلی (هوشمند)
-    if text == '🔄 تمدید سرویس فعلی' and state.get(uid) and 'current_srv' in state[uid]:
-        srv_info = state[uid]['current_srv'] # مثلا "📦 100G | 👤 amir"
+    # تمدید سریع سرویس فعلی
+    if text == '🔄 تمدید سرویس فعلی' and uid in state and 'current_srv' in state[uid]:
+        srv_info = state[uid]['current_srv']
         try:
+            # استخراج حجم از متن سرویس: "📦 100G | ..."
             vol_str = srv_info.split('|')[0].replace('📦','').strip().replace('G','')
             vol_val = int(vol_str)
-            month = 1 # پیش فرض تمدید فعلی ۱ ماهه
-            price = int((vol_val / 10) * db.get("base_price", 50000) * month)
+            price = int((vol_val / 10) * db.get("base_price", 50000))
             state[uid].update({'vol': f"{vol_val}G", 'price': price, 'duration': '1 ماه', 'step': 'wait_pay'})
-            invoice = f"📇 <b>فاکتور تمدید سرویس فعلی</b>\n\n👤 سرویس: {srv_info}\n⏳ مدت: 1 ماه\n💶 مبلغ: {price:,} تومان"
+            invoice = f"📇 <b>فاکتور تمدید سرویس فعلی</b>\n\n👤 {srv_info}\n⏳ مدت: 1 ماه\n💶 مبلغ: {price:,} تومان"
             await update.message.reply_text(invoice, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("تایید و پرداخت ✅", callback_data="show_card")]]), parse_mode='HTML')
-        except:
-            await update.message.reply_text("❌ خطا در استخراج اطلاعات سرویس.")
+        except: await update.message.reply_text("خطا در تمدید خودکار. لطفاً دستی وارد کنید.")
         return
 
-    # دریافت حجم تمدید دستی
-    if isinstance(state.get(uid), dict) and state[uid].get('step') == 'ren_get_vol':
+    # دریافت حجم دستی
+    if uid in state and isinstance(state[uid], dict) and state[uid].get('step') == 'ren_get_vol':
         try:
             vol_val = int(text)
             month = int(state[uid]['duration'].replace('m',''))
             raw_price = (vol_val / 10) * db.get("base_price", 50000) * month
-            
-            # اعمال تخفیف
-            discount = 0
-            if month == 3: discount = 0.05
-            elif month == 6: discount = 0.10
-            elif month >= 12: discount = 0.20
-            
+            discount = 0.05 if month == 3 else (0.10 if month == 6 else (0.20 if month >= 12 else 0))
             final_price = int(raw_price * (1 - discount))
             state[uid].update({'vol': f"{vol_val}G", 'price': final_price, 'step': 'wait_pay'})
-            
-            dist_txt = f" (با {int(discount*100)}% تخفیف)" if discount > 0 else ""
-            invoice = (f"📇 <b>پیش فاکتور تمدید</b>\n\n⏳ مدت: {month} ماه\n🚀 حجم: {vol_val} گیگ\n"
-                       f"💶 مبلغ: {final_price:,} تومان{dist_txt}")
-            await update.message.reply_text(invoice, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("تایید و پرداخت ✅", callback_data="show_card")]]), parse_mode='HTML')
-        except:
-            await update.message.reply_text("⚠️ عدد وارد کنید:")
+            await update.message.reply_text(f"📇 <b>فاکتور تمدید</b>\n\n⏳ {month} ماهه\n🚀 {vol_val} گیگ\n💶 {final_price:,} تومان", 
+                                            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("تایید و پرداخت ✅", callback_data="show_card")]]), parse_mode='HTML')
+        except: await update.message.reply_text("عدد وارد کنید:")
         return
 
     if text == 'سرویس‌های من':
         purchases = db["users"].get(uid, {}).get("purchases", [])
-        if not purchases: await update.message.reply_text("📭 لیست شما خالی است."); return
-        for p in purchases:
-            btn = [[InlineKeyboardButton("🔄 تمدید این سرویس", callback_data=f"renstart_{uid}_{purchases.index(p)}")]]
+        if not purchases: await update.message.reply_text("📭 لیست خالی است."); return
+        for i, p in enumerate(purchases):
+            btn = [[InlineKeyboardButton("🔄 تمدید این سرویس", callback_data=f"renew_{i}")]]
             await update.message.reply_text(f"✅ {p}", reply_markup=InlineKeyboardMarkup(btn))
 
     elif text == 'خرید اشتراک':
         kb = [[c] for c in db["categories"].keys()]
-        await update.message.reply_text("دسته مورد نظر:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+        await update.message.reply_text("انتخاب دسته:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
 
     elif text in db["categories"]:
         plans = db["categories"][text]
-        if not plans: await update.message.reply_text("پلنی در این دسته نیست."); return
         btn = [[InlineKeyboardButton(f"{p['name']} - {p['price']}ت", callback_data=f"buy_{text}_{p['id']}")] for p in plans]
         await update.message.reply_text(f"پلن‌های {text}:", reply_markup=InlineKeyboardMarkup(btn))
 
 async def handle_call(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; uid = str(query.from_user.id); await query.answer()
     
-    if query.data.startswith("renstart_"):
-        _, target_uid, srv_idx = query.data.split("_")
-        srv_name = db["users"][uid]["purchases"][int(srv_idx)]
+    if query.data.startswith("renew_"):
+        idx = int(query.data.split("_")[1])
+        srv_name = db["users"][uid]["purchases"][idx]
         state[uid] = {'current_srv': srv_name}
         kb = [[InlineKeyboardButton(f"{m} ماهه 📅", callback_data=f"rentime_{m}m")] for m in [1, 2, 3, 6, 12]]
-        await query.message.reply_text(
-            f"سرویس انتخاب شده: {srv_name}\n\n⏳ مدت تمدید را انتخاب کنید:\n(یا از منوی پایین گزینه تمدید سرویس فعلی را بزنید)",
-            reply_markup=RENEW_MENU, InlineKeyboardMarkup=InlineKeyboardMarkup(kb)) # دکمه های شیشه ای هم همزمان نمایش داده میشوند
+        await query.message.reply_text(f"💎 سرویس: {srv_name}\n\nمدت تمدید را انتخاب کنید یا از دکمه پایین استفاده کنید:", 
+                                        reply_markup=RENEW_MENU, InlineKeyboardMarkup=InlineKeyboardMarkup(kb))
 
     elif query.data.startswith("rentime_"):
         state[uid].update({'step': 'ren_get_vol', 'duration': query.data.split("_")[1]})
-        await query.message.reply_text("🚀 حجم درخواستی (عدد به گیگ):", reply_markup=RENEW_MENU)
+        await query.message.reply_text("🚀 مقدار حجم درخواستی (عدد گیگابایت):", reply_markup=RENEW_MENU)
 
     elif query.data == "show_card":
-        p_raw = state[uid].get('price', 0)
-        # اگر خرید جدید بود قیمت از پلن می آید
-        if 'plan' in state[uid]: p_raw = int(state[uid]['plan']['price']) * 1000
-        
-        txt = (f"💳 <b>شماره کارت:</b>\n<code>{db['card']['number']}</code>\n"
-               f"💰 <b>مبلغ: {p_raw:,} تومان</b>\n👤 <b>بنام {db['card']['name']}</b>\n\n"
-               f"لطفاً فیش را بفرستید.")
+        p = state[uid].get('price', 0)
+        if 'plan' in state[uid]: p = int(state[uid]['plan']['price']) * 1000
+        txt = f"💳 <b>شماره کارت:</b>\n<code>{db['card']['number']}</code>\n💰 <b>مبلغ: {p:,} تومان</b>\n👤 <b>بنام {db['card']['name']}</b>"
         await query.message.reply_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📤 ارسال فیش", callback_data="get_photo")]]), parse_mode='HTML')
 
-    elif query.data == "get_photo": await query.message.reply_text("📸 عکس فیش را بفرستید:")
+    elif query.data == "get_photo": await query.message.reply_text("📸 فیش را بفرستید:")
     
     elif query.data.startswith("buy_"):
         _, cat, pid = query.data.split("_")
@@ -182,15 +159,15 @@ async def handle_call(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                'vpn_name': state[target].get('vpn_name', 'تمدیدی'),
                                'vol': state[target]['plan']['name'] if is_new else state[target]['vol'],
                                'duration': 'نامحدود' if is_new else state[target]['duration']}
-        await query.message.reply_text(f"لینک را برای {target} بفرستید:")
+        await query.message.reply_text(f"لینک/پاسخ برای {target}:")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.message.from_user.id)
-    if isinstance(state.get(uid), dict) and state[uid].get('step') == 'wait_pay':
+    if uid in state and isinstance(state[uid], dict) and state[uid].get('step') == 'wait_pay':
         await context.bot.send_photo(ADMIN_ID, update.message.photo[-1].file_id, 
-                                     caption=f"فیش از {uid}\nمبلغ: {state[uid]['price']:,}ت",
+                                     caption=f"فیش جدید از {uid}\nمبلغ: {state[uid].get('price', 0):,}ت",
                                      reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ تایید و ارسال", callback_data=f"adm_pay_{uid}")]]))
-        await update.message.reply_text("🚀 ارسال شد. منتظر تایید باشید.")
+        await update.message.reply_text("🚀 ارسال شد. منتظر تایید ادمین باشید.")
 
 if __name__ == '__main__':
     Thread(target=run_web, daemon=True).start()
