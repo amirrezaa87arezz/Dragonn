@@ -1,169 +1,160 @@
 import os
+import json
+import logging
 from flask import Flask
 from threading import Thread
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
-# --- بخش زنده نگه داشتن برای Render (Flask) ---
-app_web = Flask('')
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
+app_web = Flask('')
 @app_web.route('/')
-def home():
-    return "Dragon VPN is Running!"
+def home(): return "Dragon VPN Admin Panel is Active!", 200
 
 def run_web():
-    # Render معمولاً از پورت 10000 استفاده می‌کند
     port = int(os.environ.get('PORT', 8080))
     app_web.run(host='0.0.0.0', port=port)
 
-# --- تنظیمات اصلی ربات ---
+# --- تنظیمات دیتابیس ---
+DB_PATH = '/app/data'
+DB_FILE = os.path.join(DB_PATH, 'data.json')
+
+def load_db():
+    if not os.path.exists(DB_PATH): os.makedirs(DB_PATH, exist_ok=True)
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, 'r', encoding='utf-8') as f: return json.load(f)
+    # مقادیر اولیه در صورت نبود فایل
+    return {
+        "users": {},
+        "card": {"number": "6277601368776066", "name": "رضوانی"},
+        "categories": {
+            "ارزان و به صرفه": [
+                {"id": 1, "name": "20 گیگ نامحدود", "price": "130"},
+                {"id": 2, "name": "30 گیگ نامحدود", "price": "160"}
+            ],
+            "قوی": [
+                {"id": 3, "name": "50 گیگ یک‌ماهه", "price": "280"}
+            ]
+        }
+    }
+
+def save_db(data):
+    with open(DB_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+db = load_db()
 TOKEN = '8578186075:AAFevjClPyq2hAcJxJpwhrxc0DxxBMGN8RY'
 ADMIN_ID = 5993860770
-
-# حافظه موقت برای ذخیره وضعیت کاربران و ادمین
-user_data = {} 
-admin_state = {} 
+state = {}
 
 # --- منوها ---
-MAIN_MENU = [['خرید اشتراک'], ['پشتیبانی', 'راهنمای اتصال']]
-BACK_MENU = [['بازگشت به منوی اصلی']]
+def get_main_menu(uid):
+    kb = [['خرید اشتراک', 'تست رایگان'], ['سرویس‌های من'], ['پشتیبانی', 'راهنمای اتصال']]
+    if int(uid) == ADMIN_ID: kb.append(['⚙️ مدیریت ربات'])
+    return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    welcome = "خوش اومدید به ربات Dragon vpn\nپرسرعت ارزان و به صرفه"
-    await update.message.reply_text(welcome, reply_markup=ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True))
+    uid = str(update.message.from_user.id)
+    if uid not in db["users"]:
+        db["users"][uid] = {"test_used": False, "purchases": []}
+        save_db(db)
+    await update.message.reply_text("🐉 به ربات Dragon VPN خوش آمدید", reply_markup=get_main_menu(uid))
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    user_id = update.message.from_user.id
+async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text, uid_int = update.message.text, update.message.from_user.id
+    uid = str(uid_int)
 
-    # 1. بخش مدیریت (ارسال کانفیگ برای مشتری توسط ادمین)
-    if user_id == ADMIN_ID and admin_state.get('step') == 'wait_cfg':
-        target_id = admin_state.get('target')
-        info = user_data.get(target_id, {})
+    # بخش مدیریت ادمین
+    if uid_int == ADMIN_ID:
+        if text == '⚙️ مدیریت ربات':
+            kb = [['ویرایش پلن‌ها', 'ویرایش کارت'], ['پیام همگانی', 'بازگشت به منوی اصلی']]
+            await update.message.reply_text("پنل مدیریت ادمین:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+            return
         
-        # قالب HTML برای جلوگیری از ارور کاراکترهای خاص در لینک کانفیگ
-        final_msg = (
-            f"<b>نام کاربری سرویس :</b> {info.get('name', 'نامشخص')}\n"
-            f"<b>⏳ مدت زمان:</b> {info.get('time', 'نامشخص')}\n"
-            f"<b>🗜 حجم سرویس:</b> {info.get('vol', 'نامشخص')}\n\n"
-            f"<b>لینک اتصال:</b>\n<code>{text}</code>\n\n"
-            f"🧑‍🦯 شما میتوانید شیوه اتصال را با فشردن دکمه زیر دریافت کنید\n\n"
-            f"🟢 اگر لینک ساب شما داخل برنامه اضافه نشد، ربات @URLExtractor_Bot به شما کمک می‌کنه.\n"
-            f"🔵 کافیه لینک ساب خودتون رو بهش بدید."
-        )
-        
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("آموزش اتصال", url="https://t.me/help_dragon")]])
-        
-        try:
-            await context.bot.send_message(chat_id=target_id, text=final_msg, reply_markup=kb, parse_mode='HTML')
-            await update.message.reply_text(f"✅ کانفیگ با موفقیت برای کاربر {target_id} ارسال شد.")
-        except Exception as e:
-            await update.message.reply_text(f"❌ خطا در ارسال نهایی: {str(e)}")
-            
-        admin_state.clear()
-        return
+        elif text == 'ویرایش کارت':
+            state[uid] = 'edit_card_num'
+            await update.message.reply_text("شماره کارت جدید را بفرستید:")
+            return
 
-    # 2. مدیریت دکمه‌های منو
+        elif state.get(uid) == 'edit_card_num':
+            db["card"]["number"] = text
+            state[uid] = 'edit_card_name'
+            await update.message.reply_text("نام صاحب کارت را بفرستید:")
+            return
+
+        elif state.get(uid) == 'edit_card_name':
+            db["card"]["name"] = text
+            save_db(db); state[uid] = None
+            await update.message.reply_text("✅ اطلاعات کارت آپدیت شد.")
+            return
+
+        # ارسال کانفیگ/پاسخ تمدید
+        if state.get(uid, {}).get('step') == 'wait_cfg':
+            target = state[uid]['target']
+            await context.bot.send_message(chat_id=target, text=f"✅ پیام جدید از ادمین:\n\n<code>{text}</code>", parse_mode='HTML')
+            await update.message.reply_text("ارسال شد."); state[uid] = None; return
+
+    # منوی کاربر
     if text == 'بازگشت به منوی اصلی':
-        user_data[user_id] = {}
+        state[uid] = None
         await start(update, context)
-
-    elif text == 'خرید اشتراک':
-        await update.message.reply_text("لطفاً نوع سرویس را انتخاب کنید:", 
-            reply_markup=ReplyKeyboardMarkup([['ارزان و به صرفه'], ['قوی'], ['بازگشت به منوی اصلی']], resize_keyboard=True))
-
-    elif text == 'ارزان و به صرفه':
-        prices = [
-            [InlineKeyboardButton("20 گیگ | نامحدود - 130,000", callback_data="p_20G_نامحدود_130")],
-            [InlineKeyboardButton("30 گیگ | نامحدود - 160,000", callback_data="p_30G_نامحدود_160")],
-            [InlineKeyboardButton("50 گیگ | نامحدود - 250,000", callback_data="p_50G_نامحدود_250")],
-            [InlineKeyboardButton("100 گیگ | نامحدود - 420,000", callback_data="p_100G_نامحدود_420")]
-        ]
-        await update.message.reply_text("لیست پلن‌های ارزان و به صرفه:", reply_markup=InlineKeyboardMarkup(prices))
-
-    elif text == 'قوی':
-        prices = [
-            [InlineKeyboardButton("20 گیگ | 1 ماهه - 150,000", callback_data="p_20G_1 ماهه_150")],
-            [InlineKeyboardButton("50 گیگ | 1 ماهه - 280,000", callback_data="p_50G_1 ماهه_280")],
-            [InlineKeyboardButton("100 گیگ | 1 ماهه - 550,000", callback_data="p_100G_1 ماهه_550")],
-            [InlineKeyboardButton("200 گیگ | 3 ماهه - 1,100,000", callback_data="p_200G_3 ماهه_1100")]
-        ]
-        await update.message.reply_text("لیست پلن‌های قوی (VIP):", reply_markup=InlineKeyboardMarkup(prices))
-
-    elif text == 'پشتیبانی':
-        await update.message.reply_text("برای پشتیبانی به آیدی زیر پیام دهید:\n@reunite_music", reply_markup=ReplyKeyboardMarkup(BACK_MENU, resize_keyboard=True))
-
-    elif text == 'راهنمای اتصال':
-        await update.message.reply_text("آموزشات در چنل زیر:\nhttps://t.me/help_dragon")
-
-    # 3. دریافت نام کاربری انتخابی از کاربر
-    elif user_id in user_data and user_data[user_id].get('step') == 'get_name':
-        user_data[user_id]['name'] = text
-        user_data[user_id]['step'] = 'wait_pay'
-        price = user_data[user_id]['price']
-        
-        invoice = (f"📇 پیش فاکتور شما:\n👤 نام انتخابی: {text}\n"
-                   f"🔐 سرویس: {user_data[user_id]['vol']} | {user_data[user_id]['time']}\n"
-                   f"💶 قیمت: {price},000 تومان\n💰 سفارش شما آماده پرداخت است")
-        
-        await update.message.reply_text(invoice, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("ادامه و دریافت شماره کارت ✅", callback_data="show_card")]]))
-
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    user_id = query.from_user.id
-    await query.answer()
     
-    if query.data.startswith("p_"):
-        _, vol, time, price = query.data.split("_")
-        user_data[user_id] = {'vol': vol, 'time': time, 'price': price, 'step': 'get_name'}
-        await query.message.reply_text("لطفاً یک نام کاربری برای کانفیگ خود انتخاب و ارسال کنید (مثلاً: ali):", reply_markup=ReplyKeyboardMarkup(BACK_MENU, resize_keyboard=True))
+    elif text == 'خرید اشتراک':
+        kb = [[cat] for cat in db["categories"].keys()]
+        kb.append(['بازگشت به منوی اصلی'])
+        await update.message.reply_text("انتخاب دسته:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+
+    elif text in db["categories"]:
+        plans = db["categories"][text]
+        btn = [[InlineKeyboardButton(f"{p['name']} - {p['price']}ت", callback_data=f"buy_{text}_{p['id']}")] for p in plans]
+        await update.message.reply_text(f"پلن‌های {text}:", reply_markup=InlineKeyboardMarkup(btn))
+
+    elif text == 'تست رایگان':
+        if db["users"][uid].get("test_used"):
+            await update.message.reply_text("❌ قبلاً استفاده شده.")
+        else:
+            await update.message.reply_text("🚀 درخواست ثبت شد.")
+            btn = [[InlineKeyboardButton("ارسال تست 🎁", callback_data=f"adm_test_{uid}")]]
+            await context.bot.send_message(chat_id=ADMIN_ID, text=f"درخواست تست: {uid}", reply_markup=InlineKeyboardMarkup(btn))
+
+async def handle_call(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    uid = str(query.from_user.id)
+    await query.answer()
+
+    if query.data.startswith("buy_"):
+        _, cat, pid = query.data.split("_")
+        plan = next(p for p in db["categories"][cat] if str(p['id']) == pid)
+        state[uid] = {'plan': plan}
+        txt = f"📇 فاکتور:\n🔐 سرویس: {plan['name']}\n💶 قیمت: {plan['price']},000 تومان"
+        await query.message.reply_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("ادامه ✅", callback_data="show_card")]]))
 
     elif query.data == "show_card":
-        info = user_data.get(user_id, {})
-        bank = (f"💳 شماره کارت:\n<code>6277601368776066</code>\n"
-                f"💰 مبلغ: {info['price']},000 تومان\n👤 بنام رضوانی\n\n"
-                f"⭕ کاربر گرامی لطفاً مبلغ واریزی را بصورت دقیق واریز کنید\n"
-                f"⭕ از ارسال فیش جعلی خودداری فرمایید")
-        await query.message.reply_text(bank, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("ارسال فیش واریزی", callback_data="get_receipt")]]), parse_mode='HTML')
+        txt = f"💳 شماره کارت:\n<code>{db['card']['number']}</code>\n👤 بنام: {db['card']['name']}"
+        await query.message.reply_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("ارسال فیش 📸", callback_data="get_photo")]]), parse_mode='HTML')
 
-    elif query.data == "get_receipt":
-        user_data[user_id]['step'] = 'wait_photo'
-        await query.message.reply_text("لطفاً عکس فیش واریزی را ارسال فرمایید:")
+    elif query.data == "get_photo":
+        state[uid] = {'step': 'wait_photo'}
+        await query.message.reply_text("عکس فیش را بفرستید:")
 
-    elif query.data.startswith("adm_to_"):
-        target = int(query.data.split("_")[-1])
-        admin_state['step'] = 'wait_cfg'
-        admin_state['target'] = target
-        await query.message.reply_text(f"لطفاً لینک کانفیگ را برای کاربر {target} در اینجا پیست کرده و ارسال کنید:")
+    elif query.data.startswith("adm_"):
+        _, act, target = query.data.split("_")
+        state[str(ADMIN_ID)] = {'step': 'wait_cfg', 'target': int(target)}
+        await query.message.reply_text(f"لینک یا پیام را برای {target} بفرستید:")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    if user_data.get(user_id, {}).get('step') == 'wait_photo':
-        info = user_data[user_id]
-        caption = (f"🔔 فیش جدید رسید!\n🆔 آیدی عددی: <code>{user_id}</code>\n👤 نام انتخابی: {info['name']}\n"
-                   f"📦 پلن: {info['vol']} | {info['time']}")
-        
-        await context.bot.send_photo(chat_id=ADMIN_ID, photo=update.message.photo[-1].file_id, 
-            caption=caption, parse_mode='HTML',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("ارسال کانفیگ ✅", callback_data=f"adm_to_{user_id}")]]))
-        
-        await update.message.reply_text("🚀 رسید شما ارسال شد. پس از بررسی توسط ادمین، سرویس برای شما ارسال خواهد شد.")
-        user_data[user_id]['step'] = 'done'
-
-# --- اجرای ربات ---
-def main():
-    # شروع ترد Flask برای زنده نگه داشتن در Render
-    Thread(target=run_web).start()
-
-    app = Application.builder().token(TOKEN).build()
-    
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(CallbackQueryHandler(handle_callback))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    
-    print("Dragon VPN is Online...")
-    app.run_polling()
+    uid = str(update.message.from_user.id)
+    if state.get(uid, {}).get('step') == 'wait_photo':
+        btn = [[InlineKeyboardButton("✅ تایید و ارسال", callback_data=f"adm_pay_{uid}")]]
+        await context.bot.send_photo(chat_id=ADMIN_ID, photo=update.message.photo[-1].file_id, caption=f"فیش از {uid}", reply_markup=InlineKeyboardMarkup(btn))
+        await update.message.reply_text("🚀 فیش برای ادمین ارسال شد.")
 
 if __name__ == '__main__':
-    main()
+    Thread(target=run_web, daemon=True).start()
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
+    app.add_handler(CallbackQueryHandler(handle_call))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.run_polling(drop_pending_updates=True)
