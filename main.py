@@ -10,7 +10,7 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=lo
 
 app_web = Flask('')
 @app_web.route('/')
-def home(): return "VPN Bot 25.0 - PRO", 200
+def home(): return "VPN Bot 26.0 - Professional", 200
 
 def run_web():
     port = int(os.environ.get('PORT', 8080))
@@ -18,14 +18,12 @@ def run_web():
 
 # --- دیتابیس ---
 DB_FILE = 'data.json'
-
 def load_db():
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, 'r', encoding='utf-8') as f: return json.load(f)
         except: pass
-    
-    init_db = {
+    return {
         "users": {}, "brand": "Dragon VPN",
         "card": {"number": "6277601368776066", "name": "رضوانی"},
         "categories": {"ارزان و به صرفه": [], "قوی": []},
@@ -36,7 +34,6 @@ def load_db():
             "test": "🚀 درخواست تست رایگان شما در {brand} ارسال شد."
         }
     }
-    return init_db
 
 def save_db(data):
     with open(DB_FILE, 'w', encoding='utf-8') as f:
@@ -77,81 +74,111 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if uid == str(ADMIN_ID):
         if text == '⚙️ مدیریت ربات':
             kb = [['افزودن پلن', 'حذف پلن'], ['ویرایش کارت', 'ویرایش متن‌ها'], ['ویرایش برند', 'بازگشت به منوی اصلی']]
-            await update.message.reply_text("🛠 مدیریت سیستم:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)); return
+            await update.message.reply_text("🛠 مدیریت:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)); return
 
-        if text == 'ویرایش متن‌ها':
-            kb = [['ویرایش متن پشتیبانی', 'ویرایش متن راهنما'], ['ویرایش متن تست', 'ویرایش خوش‌آمدگویی'], ['❌ انصراف و بازگشت']]
-            await update.message.reply_text("انتخاب بخش:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)); return
-
-        # ذخیره‌سازی ویرایش‌ها
-        if step == 'ed_brand':
-            db["brand"] = text; save_db(db); user_data[uid] = {}
-            await update.message.reply_text(f"✅ برند به {text} تغییر کرد.", reply_markup=get_main_menu(uid)); return
-        if step and step.startswith('et_'):
-            key = step.replace('et_', ''); db["texts"][key] = text; save_db(db); user_data[uid] = {}
-            await update.message.reply_text("✅ با موفقیت آپدیت شد.", reply_markup=get_main_menu(uid)); return
-
-        # افزودن پلن با مرتب‌سازی قیمت
+        # فرآیند افزودن پلن (حجم -> کاربر -> قیمت)
         if text == 'افزودن پلن':
             user_data[uid]['step'] = 'ap_cat'
             kb = [[c] for c in db["categories"].keys()]
             await update.message.reply_text("دسته را انتخاب کنید:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)); return
         if step == 'ap_cat':
-            user_data[uid].update({'step': 'ap_name', 'cat': text})
-            await update.message.reply_text("نام پلن (مثلا 50GB):", reply_markup=BACK_KB); return
-        if step == 'ap_name':
-            user_data[uid].update({'step': 'ap_price', 'name': text})
+            user_data[uid].update({'step': 'ap_vol', 'cat': text})
+            await update.message.reply_text("حجم پلن را وارد کنید (مثلا 50 گیگ):", reply_markup=BACK_KB); return
+        if step == 'ap_vol':
+            user_data[uid].update({'step': 'ap_user', 'vol': text})
+            await update.message.reply_text("تعداد کاربر را وارد کنید (مثلا 2):"); return
+        if step == 'ap_user':
+            user_data[uid].update({'step': 'ap_price', 'user': text})
             await update.message.reply_text("قیمت را به عدد (هزار تومان) وارد کنید:"); return
         if step == 'ap_price':
             c = user_data[uid]['cat']
-            # اضافه کردن پلن
-            db["categories"][c].append({"id": len(db["categories"][c])+1, "name": user_data[uid]['name'], "price": int(text)})
-            # مرتب‌سازی بر اساس قیمت (ارزان به گران)
+            p_name = f"{user_data[uid]['vol']} | {user_data[uid]['user']} کاربره"
+            db["categories"][c].append({"id": len(db["categories"][c])+1, "name": p_name, "price": int(text)})
             db["categories"][c] = sorted(db["categories"][c], key=lambda x: x['price'])
             save_db(db); user_data[uid] = {}
-            await update.message.reply_text("✅ پلن اضافه و لیست بر اساس قیمت مرتب شد.", reply_markup=get_main_menu(uid)); return
+            await update.message.reply_text("✅ پلن با جزئیات کامل اضافه و لیست مرتب شد.", reply_markup=get_main_menu(uid)); return
 
-        if text == 'حذف پلن':
-            for c, plans in db["categories"].items():
-                for p in plans:
-                    btn = [[InlineKeyboardButton(f"حذف {p['name']} ({c})", callback_data=f"del_{c}_{p['id']}")]]
-                    await update.message.reply_text(f"📍 پلن: {p['name']} | قیمت: {p['price']}ت", reply_markup=InlineKeyboardMarkup(btn))
-            return
+        # ارسال کانفیگ توسط ادمین
+        if step == 'admin_send_config':
+            target_id = user_data[uid]['target']
+            config_data = text
+            brand = db.get('brand', 'Dragon VPN')
+            user_msg = (f"🚀 <b>سرویس جدید شما آماده شد!</b>\n"
+                        f"━━━━━━━━━━━━━━━\n"
+                        f"🛡 برند: <b>{brand}</b>\n"
+                        f"👤 اشتراک: <code>{user_data[uid].get('vpn_name', 'نامشخص')}</code>\n"
+                        f"📦 جزئیات: <b>{user_data[uid].get('vol_info', 'پلن خریداری شده')}</b>\n"
+                        f"━━━━━━━━━━━━━━━\n"
+                        f"📥 <b>کانفیگ اختصاصی:</b>\n\n<code>{config_data}</code>\n\n"
+                        f"━━━━━━━━━━━━━━━\n"
+                        f"🆘 در صورت بروز مشکل با پشتیبانی در ارتباط باشید.")
+            await context.bot.send_message(target_id, user_msg, parse_mode='HTML')
+            # ذخیره در تاریخچه کاربر
+            db["users"][target_id]["purchases"].append(f"📦 {user_data[uid].get('vol_info')} | {user_data[uid].get('vpn_name')}")
+            save_db(db)
+            await update.message.reply_text("✅ کانفیگ با موفقیت برای کاربر ارسال شد.", reply_markup=get_main_menu(uid))
+            user_data[uid] = {}; return
 
-        maps = {'ویرایش متن پشتیبانی':'et_support', 'ویرایش متن راهنما':'et_guide', 'ویرایش متن تست':'et_test', 'ویرایش خوش‌آمدگویی':'et_welcome', 'ویرایش برند':'ed_brand'}
+        # بقیه بخش‌های مدیریت (برند و متن‌ها)
+        if step == 'ed_brand':
+            db["brand"] = text; save_db(db); user_data[uid] = {}
+            await update.message.reply_text(f"✅ برند تغییر کرد.", reply_markup=get_main_menu(uid)); return
+        if step and step.startswith('et_'):
+            key = step.replace('et_', ''); db["texts"][key] = text; save_db(db); user_data[uid] = {}
+            await update.message.reply_text("✅ آپدیت شد.", reply_markup=get_main_menu(uid)); return
+        
+        maps = {'ویرایش متن پشتیبانی':'et_support', 'ویرایش متن راهنما':'et_guide', 'ویرایش متن تست':'et_test', 'ویرایش خوش‌آمدگویی':'et_welcome', 'ویرایش برند':'ed_brand', 'ویرایش کارت':'ed_card_n'}
         if text in maps:
             user_data[uid]['step'] = maps[text]
             await update.message.reply_text("متن جدید را بفرستید:", reply_markup=BACK_KB); return
 
     # --- بخش کاربر ---
-    if text == 'راهنمای اتصال': await update.message.reply_text(db["texts"]["guide"].format(brand=db["brand"]), parse_mode='HTML'); return
-    if text == 'پشتیبانی': await update.message.reply_text(db["texts"]["support"].format(brand=db["brand"]), parse_mode='HTML'); return
-    
     if text == 'خرید اشتراک':
         kb = [[c] for c in db["categories"].keys()]
-        await update.message.reply_text("📂 دسته بندی مورد نظر را انتخاب کنید:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)); return
+        await update.message.reply_text("📂 دسته بندی مورد نظر:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)); return
 
     if text in db["categories"]:
         plans = db["categories"][text]
-        if not plans: await update.message.reply_text("❌ فعلا پلنی در این دسته وجود ندارد."); return
+        if not plans: await update.message.reply_text("❌ پلنی یافت نشد."); return
         btn = [[InlineKeyboardButton(f"{p['name']} - {p['price']},000ت", callback_data=f"buy_{text}_{p['id']}")] for p in plans]
-        await update.message.reply_text(f"🚀 لیست پلن‌های {text} (به ترتیب قیمت):", reply_markup=InlineKeyboardMarkup(btn)); return
+        await update.message.reply_text(f"🚀 لیست پلن‌های {text}:", reply_markup=InlineKeyboardMarkup(btn)); return
 
-    # مرحله دریافت نام برای کانفیگ
     if step == 'get_vpn_name':
         plan = user_data[uid]['plan']
         price = int(plan['price']) * 1000
-        user_data[uid].update({'step': 'wait_pay', 'vpn_name': text, 'price': price, 'vol': plan['name']})
-        
-        invoice = (f"📑 <b>پیش فاکتور خرید سرویس</b>\n"
-                   f"━━━━━━━━━━━━━━━\n"
-                   f"👤 نام اکانت: <code>{text}</code>\n"
-                   f"📦 نوع پلن: <b>{plan['name']}</b>\n"
-                   f"💰 مبلغ قابل پرداخت: <b>{price:,} تومان</b>\n"
-                   f"━━━━━━━━━━━━━━━\n"
-                   f"✅ در صورت صحت اطلاعات بالا، روی دکمه تایید کلیک کنید:")
-        await update.message.reply_text(invoice, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("تایید و دریافت شماره کارت 💳", callback_data="show_card")]]), parse_mode='HTML')
+        user_data[uid].update({'step': 'wait_pay', 'vpn_name': text, 'price': price, 'vol_info': plan['name']})
+        inv = (f"📑 <b>پیش فاکتور خرید {db['brand']}</b>\n"
+               f"━━━━━━━━━━━━━━━\n"
+               f"👤 نام اکانت: <code>{text}</code>\n"
+               f"📦 نوع پلن: <b>{plan['name']}</b>\n"
+               f"💰 مبلغ: <b>{price:,} تومان</b>\n"
+               f"━━━━━━━━━━━━━━━\n"
+               f"✅ جهت تایید و دریافت کارت کلیک کنید:")
+        await update.message.reply_text(inv, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("تایید و دریافت کارت 💳", callback_data="show_card")]]), parse_mode='HTML')
         return
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = str(update.effective_user.id)
+    if user_data.get(uid, {}).get('step') == 'wait_pay':
+        price = user_data[uid].get('price', 0)
+        vpn_name = user_data[uid].get('vpn_name', 'نامشخص')
+        vol_info = user_data[uid].get('vol_info', 'نامشخص')
+        
+        # ارسال برای ادمین
+        adm_msg = (f"💰 <b>فیش واریزی جدید!</b>\n"
+                   f"━━━━━━━━━━━━━━━\n"
+                   f"👤 از کاربر: <code>{uid}</code>\n"
+                   f"📝 نام اکانت: <b>{vpn_name}</b>\n"
+                   f"📦 پلن: <b>{vol_info}</b>\n"
+                   f"💵 مبلغ: <b>{price:,} تومان</b>\n"
+                   f"━━━━━━━━━━━━━━━\n"
+                   f"👇 جهت ارسال کانفیگ دکمه زیر را بزنید:")
+        btn = [[InlineKeyboardButton("✅ تایید و ارسال کانفیگ", callback_data=f"adm_send_{uid}_{vpn_name}_{vol_info}")]]
+        await context.bot.send_photo(ADMIN_ID, update.message.photo[-1].file_id, caption=adm_msg, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(btn))
+        
+        # پیام تایید برای کاربر
+        await update.message.reply_text("🚀 فیش شما با موفقیت برای ادمین ارسال شد.\nپس از تایید، کانفیگ همین‌جا برایتان ارسال می‌شود.", reply_markup=get_main_menu(uid))
+        user_data[uid]['step'] = None
 
 async def handle_call(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; uid = str(query.from_user.id); await query.answer()
@@ -160,32 +187,33 @@ async def handle_call(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, cat, pid = query.data.split("_")
         plan = next(p for p in db["categories"][cat] if str(p['id']) == pid)
         user_data[uid] = {'step': 'get_vpn_name', 'plan': plan}
-        await query.message.reply_text("📝 لطفاً یک نام برای اکانت خود بفرستید (مثلا Ali):", reply_markup=BACK_KB)
+        await query.message.reply_text("📝 نام اکانت را بفرستید (مثلاً Ali):", reply_markup=BACK_KB)
 
     elif query.data == "show_card":
         p = user_data[uid].get('price', 0)
-        card_msg = (f"💳 <b>اطلاعات واریز وجه ({db['brand']})</b>\n"
-                    f"━━━━━━━━━━━━━━━\n"
-                    f"💰 مبلغ: <b>{p:,} تومان</b>\n"
-                    f"📍 شماره کارت:\n<code>{db['card']['number']}</code>\n"
-                    f"👤 بنام: <b>{db['card']['name']}</b>\n"
-                    f"━━━━━━━━━━━━━━━\n"
-                    f"⚠️ <b>نکته مهم:</b>\n"
-                    f"لطفا پس از واریز، عکس فیش را از طریق دکمه زیر ارسال کنید.")
-        await query.message.reply_text(card_msg, parse_mode='HTML', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📤 ارسال فیش واریزی", callback_data="get_photo")]]))
+        msg = (f"💳 <b>اطلاعات واریز ({db['brand']})</b>\n"
+               f"━━━━━━━━━━━━━━━\n"
+               f"💰 مبلغ: <b>{p:,} تومان</b>\n"
+               f"📍 شماره کارت:\n<code>{db['card']['number']}</code>\n"
+               f"👤 بنام: <b>{db['card']['name']}</b>\n"
+               f"━━━━━━━━━━━━━━━\n"
+               f"👇 پس از واریز، دکمه ارسال فیش را بزنید:")
+        await query.message.reply_text(msg, parse_mode='HTML', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📤 ارسال فیش واریزی", callback_data="get_photo")]]))
 
-    elif query.data == "get_photo": 
-        await query.message.reply_text("📸 لطفاً عکس فیش واریزی خود را بفرستید:", reply_markup=BACK_KB)
+    elif query.data == "get_photo":
+        user_data[uid]['step'] = 'wait_pay'
+        await query.message.reply_text("📸 لطفاً عکس فیش را ارسال کنید:")
 
-    elif query.data.startswith("del_"):
-        _, c, pid = query.data.split("_")
-        db["categories"][c] = [p for p in db["categories"][c] if str(p['id']) != pid]
-        save_db(db); await query.message.edit_text("✅ پلن حذف شد.")
+    elif query.data.startswith("adm_send_"):
+        _, _, target_id, v_name, v_info = query.data.split("_")
+        user_data[str(ADMIN_ID)] = {'step': 'admin_send_config', 'target': target_id, 'vpn_name': v_name, 'vol_info': v_info}
+        await context.bot.send_message(ADMIN_ID, f"📨 لطفاً کانفیگ را برای کاربر <code>{target_id}</code> بفرستید:", parse_mode='HTML', reply_markup=BACK_KB)
 
 if __name__ == '__main__':
     Thread(target=run_web, daemon=True).start()
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(CallbackQueryHandler(handle_call))
     app.run_polling()
