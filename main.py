@@ -60,6 +60,10 @@ def load_db():
             with open(DB_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 logger.info("✅ Database loaded")
+                
+                # اضافه کردن فیلدهای جدید اگر نبود
+                if "force_join" not in data:
+                    data["force_join"] = {"enabled": False, "channel_id": "", "channel_link": "", "channel_username": ""}
                 return data
     except Exception as e:
         logger.error(f"❌ Error loading: {e}")
@@ -101,7 +105,7 @@ user_data = {}
 def main_menu(uid):
     kb = [
         ['💰 خرید', '🎁 تست'],
-        ['📂 سرویس‌ها'],
+        ['📂 سرویس‌ها', '⏳ تمدید'],  # تمدید اضافه شد
         ['👤 پشتیبانی', '📚 آموزش'],
         ['🤝 دعوت دوستان']
     ]
@@ -123,12 +127,12 @@ def admin_menu():
     ]
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
-# --- بررسی عضویت (اصلاح شده) ---
+# --- بررسی عضویت (اصلاح شده کامل) ---
 def check_join(user_id, context):
     """بررسی عضویت کاربر در کانال"""
     if not db["force_join"]["enabled"]:
         return True
-        
+    
     channel_id = db["force_join"].get("channel_id", "")
     channel_username = db["force_join"].get("channel_username", "")
     
@@ -136,30 +140,32 @@ def check_join(user_id, context):
         return True
     
     try:
-        # اول با آیدی عددی تلاش کن
+        # امتحان با آیدی عددی
         if channel_id:
             try:
                 member = context.bot.get_chat_member(
                     chat_id=int(channel_id),
                     user_id=int(user_id)
                 )
-                return member.status in ['member', 'administrator', 'creator']
-            except:
-                pass
+                if member.status in ['member', 'administrator', 'creator']:
+                    return True
+            except Exception as e:
+                logger.error(f"Error with channel_id: {e}")
         
-        # بعد با یوزرنیم تلاش کن
+        # امتحان با یوزرنیم
         if channel_username:
-            member = context.bot.get_chat_member(
-                chat_id=channel_username,
-                user_id=int(user_id)
-            )
-            return member.status in ['member', 'administrator', 'creator']
-            
+            try:
+                member = context.bot.get_chat_member(
+                    chat_id=channel_username,
+                    user_id=int(user_id)
+                )
+                if member.status in ['member', 'administrator', 'creator']:
+                    return True
+            except Exception as e:
+                logger.error(f"Error with username: {e}")
+                
     except Exception as e:
-        logger.error(f"❌ Error checking join: {e}")
-        # اگر خطای 400 یعنی کاربر اصلاً عضو نیست
-        if "400" in str(e):
-            return False
+        logger.error(f"❌ Check join error: {e}")
     
     return False
 
@@ -256,6 +262,25 @@ def handle_msg(update, context):
             update.message.reply_text(msg)
             return
 
+        # تمدید سرویس
+        if text == '⏳ تمدید':
+            pur = db["users"][uid].get("purchases", [])
+            if not pur:
+                update.message.reply_text("❌ سرویسی برای تمدید ندارید")
+                return
+            
+            keyboard = []
+            for i, p in enumerate(pur[-5:]):
+                keyboard.append([InlineKeyboardButton(
+                    f"🔄 {p[:30]}...",
+                    callback_data=f"renew_{i}"
+                )])
+            update.message.reply_text(
+                "سرویس مورد نظر را انتخاب کنید:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return
+
         # پشتیبانی
         if text == '👤 پشتیبانی':
             update.message.reply_text(db["texts"]["support"].format(support=db["support"]))
@@ -291,8 +316,10 @@ def handle_msg(update, context):
             plans = db["categories"][text]
             keyboard = []
             for p in plans:
+                # نمایش قیمت به تومان
+                price_toman = p['price'] * 1000
                 btn = InlineKeyboardButton(
-                    f"{p['name']} - {p['price']} هزار تومان",
+                    f"{p['name']} - {price_toman:,} تومان",
                     callback_data=f"buy_{p['id']}"
                 )
                 keyboard.append([btn])
@@ -350,7 +377,7 @@ def handle_msg(update, context):
                 update.message.reply_text("نام برند را بفرستید:", reply_markup=back_btn())
                 return
 
-            # عضویت اجباری (اصلاح شده)
+            # عضویت اجباری
             if text == '🔒 عضویت':
                 keyboard = [
                     ['✅ فعال کردن', '❌ غیرفعال کردن'],
@@ -387,7 +414,7 @@ def handle_msg(update, context):
                 user_data[uid] = {'step': 'set_link'}
                 update.message.reply_text(
                     "🔗 لینک کانال را بفرستید (مثال: https://t.me/mychannel):\n\n"
-                    "⚠️ نکته: ربات باید در کانال ادمین باشد!",
+                    "⚠️ نکته مهم: ربات باید در کانال ادمین باشد!",
                     reply_markup=back_btn()
                 )
                 return
@@ -568,14 +595,14 @@ def handle_msg(update, context):
             if step == 'new_vol':
                 user_data[uid]['vol'] = text
                 user_data[uid]['step'] = 'new_users'
-                update.message.reply_text("تعداد کاربران:")
+                update.message.reply_text("تعداد کاربران (عدد):")
                 return
 
             if step == 'new_users':
                 try:
                     user_data[uid]['users'] = int(text)
                     user_data[uid]['step'] = 'new_days'
-                    update.message.reply_text("مدت (روز):")
+                    update.message.reply_text("مدت اعتبار (روز):")
                 except:
                     update.message.reply_text("❌ عدد وارد کنید")
                 return
@@ -622,21 +649,32 @@ def handle_msg(update, context):
             if step == 'send_config':
                 target = user_data[uid]['target']
                 name = user_data[uid]['name']
+                vol = user_data[uid].get('vol', 'نامحدود')
+                
+                # ثبت در سرویس‌های من
+                service_record = f"🚀 {name} | {vol} | {datetime.now().strftime('%Y-%m-%d')}"
+                if str(target) not in db["users"]:
+                    db["users"][str(target)] = {"purchases": []}
+                
+                if "purchases" not in db["users"][str(target)]:
+                    db["users"][str(target)]["purchases"] = []
+                
+                db["users"][str(target)]["purchases"].append(service_record)
+                save_db(db)
                 
                 msg = (
                     f"🎉 سرویس شما آماده است\n"
                     f"👤 {name}\n"
+                    f"📦 حجم: {vol}\n"
                     f"🔗 {update.message.text}\n"
                     f"📚 {db['guide']}"
                 )
                 
                 try:
                     context.bot.send_message(int(target), msg)
-                    db["users"][str(target)]["purchases"].append(f"{name} | {datetime.now()}")
-                    save_db(db)
-                    update.message.reply_text("✅ ارسال شد")
-                except:
-                    update.message.reply_text("❌ خطا")
+                    update.message.reply_text("✅ کانفیگ ارسال شد")
+                except Exception as e:
+                    update.message.reply_text(f"❌ خطا: {e}")
                 
                 user_data[uid] = {}
                 return
@@ -646,11 +684,12 @@ def handle_msg(update, context):
             user_data[uid]['account'] = text
             p = user_data[uid]['plan']
             
+            price_toman = p['price'] * 1000
             msg = (
                 f"💳 اطلاعات پرداخت\n"
                 f"👤 نام: {text}\n"
                 f"📦 {p['name']}\n"
-                f"💰 {p['price']*1000:,} تومان\n\n"
+                f"💰 {price_toman:,} تومان\n\n"
                 f"💳 شماره کارت:\n{db['card']['number']}\n"
                 f"👤 {db['card']['name']}\n\n"
                 "پس از واریز، عکس فیش را بفرستید"
@@ -666,97 +705,168 @@ def handle_msg(update, context):
         logger.error(f"Error: {e}")
         update.message.reply_text("❌ خطا، دوباره تلاش کنید")
 
-# --- کالبک (اصلاح شده) ---
+# --- کالبک ---
 def handle_cb(update, context):
-    query = update.callback_query
-    uid = str(query.from_user.id)
-    query.answer()
+    try:
+        query = update.callback_query
+        uid = str(query.from_user.id)
+        query.answer()
 
-    # بررسی عضویت (اصلاح شده)
-    if query.data == "join_check":
-        if check_join(uid, context):
-            query.message.delete()
-            # ارسال پیام خوش‌آمدگویی
-            welcome = db["texts"]["welcome"].format(brand=db["brand"])
-            context.bot.send_message(uid, welcome, reply_markup=main_menu(uid))
-        else:
-            query.message.reply_text(
-                "❌ شما هنوز عضو کانال نشده‌اید!\n"
-                "لطفاً ابتدا عضو شوید سپس دکمه تایید را بزنید."
-            )
-        return
+        # بررسی عضویت
+        if query.data == "join_check":
+            if check_join(uid, context):
+                query.message.delete()
+                # ارسال پیام خوش‌آمدگویی
+                welcome = db["texts"]["welcome"].format(brand=db["brand"])
+                context.bot.send_message(uid, welcome, reply_markup=main_menu(uid))
+            else:
+                query.message.reply_text(
+                    "❌ شما هنوز عضو کانال نشده‌اید!\n"
+                    "لطفاً ابتدا عضو شوید سپس دکمه تایید را بزنید."
+                )
+            return
 
-    # خرید
-    if query.data.startswith("buy_"):
-        pid = int(query.data.split("_")[1])
-        for cat in db["categories"].values():
-            for p in cat:
-                if p["id"] == pid:
-                    user_data[uid] = {'step': 'wait_name', 'plan': p}
-                    query.message.reply_text("📝 نام اکانت را وارد کنید:")
-                    return
-        query.message.reply_text("❌ پلن یافت نشد")
-
-    # ارسال فیش
-    elif query.data == "receipt":
-        if uid in user_data and 'plan' in user_data[uid]:
-            user_data[uid]['step'] = 'wait_photo'
-            query.message.reply_text("📸 عکس فیش را بفرستید:")
-        else:
-            query.message.reply_text("❌ خطا")
-
-    # حذف پلن
-    elif query.data.startswith("del_"):
-        if str(uid) == str(ADMIN_ID):
+        # خرید
+        if query.data.startswith("buy_"):
             pid = int(query.data.split("_")[1])
             for cat in db["categories"].values():
-                for i, p in enumerate(cat):
+                for p in cat:
                     if p["id"] == pid:
-                        del cat[i]
-                        save_db(db)
-                        query.message.reply_text("✅ پلن حذف شد")
+                        user_data[uid] = {'step': 'wait_name', 'plan': p}
+                        query.message.reply_text("📝 نام اکانت را وارد کنید:")
                         return
-            query.message.reply_text("❌ یافت نشد")
+            query.message.reply_text("❌ پلن یافت نشد")
 
-    # ارسال تست
-    elif query.data.startswith("test_"):
-        if str(uid) == str(ADMIN_ID):
-            parts = query.data.split("_")
-            target, name = parts[1], parts[2]
-            user_data[uid] = {'step': 'send_config', 'target': target, 'name': f"تست {name}"}
-            context.bot.send_message(ADMIN_ID, "📨 کانفیگ تست را بفرستید:")
-            query.message.edit_reply_markup()
+        # ارسال فیش
+        elif query.data == "receipt":
+            if uid in user_data and 'plan' in user_data[uid]:
+                user_data[uid]['step'] = 'wait_photo'
+                query.message.reply_text("📸 عکس فیش را بفرستید:")
+            else:
+                query.message.reply_text("❌ خطا")
+
+        # تمدید سرویس
+        elif query.data.startswith("renew_"):
+            index = int(query.data.split("_")[1])
+            purchases = db["users"][uid].get("purchases", [])
+            
+            if index < len(purchases):
+                service = purchases[index]
+                # پیدا کردن پلن مشابه
+                for cat in db["categories"].values():
+                    for p in cat:
+                        if p['volume'] in service:
+                            user_data[uid] = {'step': 'wait_name', 'plan': p, 'is_renew': True}
+                            query.message.reply_text("📝 نام اکانت را وارد کنید:")
+                            return
+                query.message.reply_text("❌ پلن یافت نشد")
+            else:
+                query.message.reply_text("❌ سرویس یافت نشد")
+
+        # حذف پلن
+        elif query.data.startswith("del_"):
+            if str(uid) == str(ADMIN_ID):
+                pid = int(query.data.split("_")[1])
+                for cat in db["categories"].values():
+                    for i, p in enumerate(cat):
+                        if p["id"] == pid:
+                            del cat[i]
+                            save_db(db)
+                            query.message.reply_text("✅ پلن حذف شد")
+                            return
+                query.message.reply_text("❌ یافت نشد")
+
+        # ارسال تست
+        elif query.data.startswith("test_"):
+            if str(uid) == str(ADMIN_ID):
+                parts = query.data.split("_")
+                if len(parts) >= 3:
+                    target = parts[1]
+                    name = parts[2]
+                    user_data[uid] = {
+                        'step': 'send_config',
+                        'target': target,
+                        'name': f"تست {name}",
+                        'vol': '3 ساعت'
+                    }
+                    context.bot.send_message(ADMIN_ID, "📨 کانفیگ تست را بفرستید:")
+                    try:
+                        query.message.edit_reply_markup(reply_markup=None)
+                    except:
+                        pass
+
+        # ارسال کانفیگ (اصلاح شده)
+        elif query.data.startswith("send_"):
+            if str(uid) == str(ADMIN_ID):
+                target = query.data.split("_")[1]
+                
+                # استخراج اطلاعات از کپشن
+                caption = query.message.caption or ""
+                lines = caption.split('\n')
+                name = "کاربر"
+                vol = "نامحدود"
+                
+                for line in lines:
+                    if "اکانت" in line:
+                        name = line.split(':')[-1].strip()
+                    elif "📦" in line:
+                        vol = line.split('📦')[-1].strip()
+                
+                user_data[uid] = {
+                    'step': 'send_config',
+                    'target': target,
+                    'name': name,
+                    'vol': vol
+                }
+                
+                context.bot.send_message(ADMIN_ID, f"📨 کانفیگ {name} را بفرستید:")
+                try:
+                    query.message.edit_reply_markup(reply_markup=None)
+                except:
+                    pass
+
+    except Exception as e:
+        logger.error(f"Callback error: {e}")
+        query.message.reply_text("❌ خطا")
 
 # --- عکس ---
 def handle_photo(update, context):
-    uid = str(update.effective_user.id)
-    
-    if user_data.get(uid, {}).get('step') == 'wait_photo':
-        p = user_data[uid]['plan']
-        acc = user_data[uid]['account']
+    try:
+        uid = str(update.effective_user.id)
         
-        cap = (
-            f"💰 فیش جدید\n"
-            f"👤 {update.effective_user.first_name}\n"
-            f"🆔 {uid}\n"
-            f"📦 {p['name']}\n"
-            f"👤 اکانت: {acc}\n"
-            f"💰 {p['price']*1000:,} تومان"
-        )
-        
-        btn = InlineKeyboardMarkup([[
-            InlineKeyboardButton("✅ ارسال کانفیگ", callback_data=f"send_{uid}")
-        ]])
-        
-        context.bot.send_photo(
-            ADMIN_ID,
-            update.message.photo[-1].file_id,
-            caption=cap,
-            reply_markup=btn
-        )
-        
-        update.message.reply_text("✅ فیش ارسال شد")
-        del user_data[uid]
+        if user_data.get(uid, {}).get('step') == 'wait_photo':
+            if 'plan' not in user_data[uid] or 'account' not in user_data[uid]:
+                update.message.reply_text("❌ اطلاعات خرید یافت نشد")
+                return
+            
+            p = user_data[uid]['plan']
+            acc = user_data[uid]['account']
+            
+            price_toman = p['price'] * 1000
+            cap = (
+                f"💰 فیش جدید\n"
+                f"👤 {update.effective_user.first_name}\n"
+                f"🆔 {uid}\n"
+                f"📦 {p['name']}\n"
+                f"👤 اکانت: {acc}\n"
+                f"💰 {price_toman:,} تومان"
+            )
+            
+            btn = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ ارسال کانفیگ", callback_data=f"send_{uid}")
+            ]])
+            
+            context.bot.send_photo(
+                ADMIN_ID,
+                update.message.photo[-1].file_id,
+                caption=cap,
+                reply_markup=btn
+            )
+            
+            update.message.reply_text("✅ فیش ارسال شد")
+            del user_data[uid]
+    except Exception as e:
+        logger.error(f"Photo error: {e}")
 
 # --- اجرا ---
 def main():
