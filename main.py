@@ -4,7 +4,7 @@ import logging
 from flask import Flask
 from threading import Thread
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 from datetime import datetime
 import traceback
 
@@ -62,6 +62,13 @@ def load_db():
             with open(DB_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 logger.info("Database loaded successfully")
+                
+                # اضافه کردن فیلدهای جدید اگر وجود نداشتند
+                if "force_join" not in data:
+                    data["force_join"] = {"enabled": False, "channel": ""}
+                if "channel_link" not in data:
+                    data["channel_link"] = ""
+                
                 return data
     except Exception as e:
         logger.error(f"Error loading database: {e}")
@@ -78,11 +85,14 @@ def load_db():
         "support_id": "@Support_Admin",
         "guide_channel": "@Guide_Channel",
         "categories": DEFAULT_PLANS.copy(),
+        "force_join": {"enabled": False, "channel": ""},
+        "channel_link": "",
         "texts": {
             "welcome": "🔰 به {brand} خوش آمدید\n\nهمه راه‌ها بسته نیست! 😊\nبا سرویس‌های پرسرعت ما، فیلترها رو کنار بزن!\n\n✅ مخصوص تلگرام، اینستاگرام، یوتیوب و...\n✅ نصب آسان روی همه دستگاه‌ها\n✅ پشتیبانی 24 ساعته",
             "support": "🆘 <b>پشتیبانی {brand}</b>\n\nبرای ارتباط با پشتیبانی به آیدی زیر پیام بدید:\n{support_id}",
             "guide": "📚 <b>آموزش اتصال</b>\n\nبرای مشاهده آموزش تصویری و متنی به کانال زیر مراجعه کنید:\n{guide_channel}",
-            "test": "🎁 درخواست تست رایگان شما ثبت شد.\n\nپس از بررسی ادمین، اکانت تست 3 ساعته برای شما ارسال می‌شود."
+            "test": "🎁 درخواست تست رایگان شما ثبت شد.\n\nپس از بررسی ادمین، اکانت تست 3 ساعته برای شما ارسال می‌شود.",
+            "force_join": "🔒 <b>عضویت اجباری</b>\n\nبرای استفاده از ربات باید در کانال زیر عضو شوید:\n{channel_link}\n\nپس از عضویت، دکمه ✅ تایید را بزنید."
         }
     }
 
@@ -124,13 +134,27 @@ def get_admin_menu():
         ['➕ افزودن پلن', '➖ حذف پلن'],
         ['💳 ویرایش کارت', '📝 ویرایش متن‌ها'],
         ['👤 ویرایش پشتیبان', '📢 ویرایش کانال آموزش'],
-        ['🏷 ویرایش برند', '📊 آمار ربات'],
-        ['📨 ارسال همگانی', '🔙 بازگشت به منوی اصلی']
+        ['🔒 عضویت اجباری', '🏷 ویرایش برند'],
+        ['📊 آمار ربات', '📨 ارسال همگانی'],
+        ['🔙 بازگشت به منوی اصلی']
     ]
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
+# --- بررسی عضویت اجباری ---
+def check_force_join(user_id, context):
+    """بررسی اینکه کاربر در کانال عضو هست یا نه"""
+    if not db["force_join"]["enabled"] or not db["force_join"]["channel"]:
+        return True
+    
+    try:
+        channel = db["force_join"]["channel"].replace('@', '').replace('https://t.me/', '')
+        member = context.bot.get_chat_member(chat_id=f"@{channel}", user_id=int(user_id))
+        return member.status in ['member', 'administrator', 'creator']
+    except:
+        return False
+
 # --- شروع ربات ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def start(update, context):
     """هندلر دستور /start"""
     try:
         uid = str(update.effective_user.id)
@@ -142,6 +166,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db["users"][uid] = {
                 "purchases": [],
                 "tests": [],
+                "test_count": 0,
                 "joined_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "username": username,
                 "first_name": first_name
@@ -151,18 +176,30 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         user_data[uid] = {}
         
+        # بررسی عضویت اجباری
+        if db["force_join"]["enabled"] and db["force_join"]["channel"]:
+            if not check_force_join(uid, context):
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("📢 عضویت در کانال", url=db["channel_link"]),
+                    InlineKeyboardButton("✅ تایید عضویت", callback_data="check_join")
+                ]])
+                
+                force_text = db["texts"]["force_join"].format(channel_link=db["channel_link"])
+                update.message.reply_text(force_text, parse_mode='HTML', reply_markup=keyboard)
+                return
+        
         welcome_text = db["texts"]["welcome"].format(brand=db["brand"])
-        await update.message.reply_text(
+        update.message.reply_text(
             welcome_text,
             reply_markup=get_main_menu(uid),
             parse_mode='HTML'
         )
     except Exception as e:
         logger.error(f"Error in start: {e}")
-        await update.message.reply_text("خطایی رخ داد. لطفاً دوباره تلاش کنید.")
+        update.message.reply_text("خطایی رخ داد. لطفاً دوباره تلاش کنید.")
 
 # --- مدیریت پیام‌ها ---
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def handle_message(update, context):
     """هندلر پیام‌های متنی"""
     try:
         if not update.message or not update.message.text:
@@ -173,30 +210,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         first_name = update.effective_user.first_name or "کاربر"
         step = user_data.get(uid, {}).get('step')
 
+        # بررسی عضویت اجباری (برای همه پیام‌ها به جز start)
+        if db["force_join"]["enabled"] and db["force_join"]["channel"]:
+            if not check_force_join(uid, context) and text != '/start':
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("📢 عضویت در کانال", url=db["channel_link"]),
+                    InlineKeyboardButton("✅ تایید عضویت", callback_data="check_join")
+                ]])
+                
+                force_text = db["texts"]["force_join"].format(channel_link=db["channel_link"])
+                update.message.reply_text(force_text, parse_mode='HTML', reply_markup=keyboard)
+                return
+
         # بازگشت به منوی اصلی
         if text == '🔙 بازگشت به منوی اصلی':
             user_data[uid] = {}
-            await start(update, context)
+            start(update, context)
             return
 
         # --- تست رایگان ---
         if text == '🎁 تست رایگان':
-            today = datetime.now().strftime("%Y-%m-%d")
+            # بررسی تعداد تست‌های قبلی
+            test_count = db["users"][uid].get("test_count", 0)
             
-            # بررسی درخواست تکراری
-            if uid in db["users"] and db["users"][uid].get("last_test") == today:
-                await update.message.reply_text("❌ شما امروز قبلاً درخواست تست داده‌اید. لطفاً فردا مجدداً تلاش کنید.")
+            if test_count >= 1:
+                await_msg = "❌ شما قبلاً یک بار اکانت تست دریافت کرده‌اید و امکان دریافت تست مجدد وجود ندارد."
+                update.message.reply_text(await_msg)
                 return
             
             # ثبت درخواست تست
-            if uid not in db["users"]:
-                db["users"][uid] = {"purchases": [], "tests": []}
-            
-            db["users"][uid]["last_test"] = today
-            db["users"][uid]["tests"].append(f"تست {today}")
+            db["users"][uid]["test_count"] = test_count + 1
+            db["users"][uid]["tests"].append(f"تست {datetime.now().strftime('%Y-%m-%d')}")
             save_db(db)
             
-            await update.message.reply_text(db["texts"]["test"])
+            update.message.reply_text(db["texts"]["test"])
             
             # اطلاع به ادمین با دکمه ارسال تست
             btn = InlineKeyboardMarkup([[
@@ -212,11 +259,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"👤 نام: {first_name}\n"
                 f"🆔 آیدی: <code>{uid}</code>\n"
                 f"👤 یوزرنیم: @{update.effective_user.username}\n"
-                f"📅 تاریخ: {today}\n"
+                f"📅 تاریخ: {datetime.now().strftime('%Y-%m-%d')}\n"
                 f"━━━━━━━━━━━━━━━"
             )
             
-            await context.bot.send_message(
+            context.bot.send_message(
                 ADMIN_ID,
                 admin_msg,
                 parse_mode='HTML',
@@ -243,19 +290,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 for i, t in enumerate(tests[-5:], 1):
                     msg += f"{i}. {t}\n"
             
-            await update.message.reply_text(msg, parse_mode='HTML')
+            update.message.reply_text(msg, parse_mode='HTML')
             return
 
         # --- تمدید سرویس ---
         if text == '⏳ تمدید سرویس':
             purchases = db["users"].get(uid, {}).get("purchases", [])
             if not purchases:
-                await update.message.reply_text("❌ شما سرویسی برای تمدید ندارید.")
+                update.message.reply_text("❌ شما سرویسی برای تمدید ندارید.")
                 return
             
             keyboard = []
             for i, purchase in enumerate(purchases[-5:]):
-                # استخراج اطلاعات از سرویس
                 parts = purchase.split('|')
                 if len(parts) >= 2:
                     service_name = parts[0].strip()
@@ -264,7 +310,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"renew_{i}")])
             
             if keyboard:
-                await update.message.reply_text(
+                update.message.reply_text(
                     "🔁 لطفاً سرویس مورد نظر برای تمدید را انتخاب کنید:",
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
@@ -276,7 +322,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 brand=db["brand"],
                 support_id=db["support_id"]
             )
-            await update.message.reply_text(support_text, parse_mode='HTML')
+            update.message.reply_text(support_text, parse_mode='HTML')
             return
 
         if text == '📚 آموزش استفاده':
@@ -284,12 +330,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 brand=db["brand"],
                 guide_channel=db["guide_channel"]
             )
-            await update.message.reply_text(guide_text, parse_mode='HTML')
+            update.message.reply_text(guide_text, parse_mode='HTML')
             return
 
         # --- معرفی به دوستان ---
         if text == '🤝 معرفی به دوستان':
-            bot_username = (await context.bot.get_me()).username
+            bot_username = context.bot.get_me().username
             referral_link = f"https://t.me/{bot_username}?start={uid}"
             msg = (
                 "🤝 <b>برنامه معرفی به دوستان</b>\n\n"
@@ -299,19 +345,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "• به ازای هر دوست، 1 روز به سرویس شما اضافه می‌شود\n"
                 "• پس از خرید دوستتان، به شما اعلام می‌شود"
             )
-            await update.message.reply_text(msg, parse_mode='HTML')
+            update.message.reply_text(msg, parse_mode='HTML')
             return
 
         # --- خرید اشتراک ---
         if text == '💰 خرید اشتراک':
-            # نمایش دسته‌بندی‌ها
             categories = list(db["categories"].keys())
             keyboard = []
             for cat in categories:
                 keyboard.append([cat])
             keyboard.append(['🔙 بازگشت به منوی اصلی'])
             
-            await update.message.reply_text(
+            update.message.reply_text(
                 "📂 لطفاً دسته‌بندی مورد نظر را انتخاب کنید:",
                 reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
             )
@@ -321,16 +366,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if text in db["categories"] and not step:
             plans = db["categories"][text]
             if not plans:
-                await update.message.reply_text("❌ این دسته‌بندی پلنی ندارد.")
+                update.message.reply_text("❌ این دسته‌بندی پلنی ندارد.")
                 return
             
             keyboard = []
             for plan in plans:
                 users_text = f"👥 {plan['users']} کاربره - " if plan['users'] > 1 else ""
-                btn_text = f"{plan['name']} - {users_text}{plan['volume']} - {plan['price']:,} تومان"
+                btn_text = f"{plan['name']} - {users_text}{plan['volume']} - {plan['price']}K تومان"
                 keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"buy_{plan['id']}")])
             
-            await update.message.reply_text(
+            update.message.reply_text(
                 f"📦 <b>{text}</b>\nلطفاً پلن مورد نظر را انتخاب کنید:",
                 parse_mode='HTML',
                 reply_markup=InlineKeyboardMarkup(keyboard)
@@ -342,7 +387,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # منوی مدیریت
             if text == '⚙️ مدیریت ربات':
-                await update.message.reply_text("🛠 پنل مدیریت:", reply_markup=get_admin_menu())
+                update.message.reply_text("🛠 پنل مدیریت:", reply_markup=get_admin_menu())
                 return
 
             # ویرایش متن‌ها
@@ -350,18 +395,52 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 keyboard = [
                     ['ویرایش متن خوش‌آمدگویی', 'ویرایش متن پشتیبانی'],
                     ['ویرایش متن آموزش', 'ویرایش متن تست'],
-                    ['🔙 بازگشت به منوی اصلی']
+                    ['ویرایش متن عضویت', '🔙 بازگشت به منوی اصلی']
                 ]
-                await update.message.reply_text(
+                update.message.reply_text(
                     "📝 کدام متن را می‌خواهید ویرایش کنید؟",
                     reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+                )
+                return
+
+            # عضویت اجباری
+            if text == '🔒 عضویت اجباری':
+                keyboard = [
+                    ['✅ فعال کردن', '❌ غیرفعال کردن'],
+                    ['🔗 تنظیم لینک کانال'],
+                    ['🔙 بازگشت به منوی اصلی']
+                ]
+                update.message.reply_text(
+                    f"🔒 وضعیت فعلی: {'فعال' if db['force_join']['enabled'] else 'غیرفعال'}\n"
+                    f"📢 کانال: {db['force_join']['channel'] or 'تنظیم نشده'}",
+                    reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+                )
+                return
+
+            if text == '✅ فعال کردن':
+                db["force_join"]["enabled"] = True
+                save_db(db)
+                update.message.reply_text("✅ عضویت اجباری فعال شد.", reply_markup=get_admin_menu())
+                return
+
+            if text == '❌ غیرفعال کردن':
+                db["force_join"]["enabled"] = False
+                save_db(db)
+                update.message.reply_text("✅ عضویت اجباری غیرفعال شد.", reply_markup=get_admin_menu())
+                return
+
+            if text == '🔗 تنظیم لینک کانال':
+                user_data[uid] = {'step': 'set_channel_link'}
+                update.message.reply_text(
+                    "🔗 لینک کانال را ارسال کنید (مثال: https://t.me/mychannel):",
+                    reply_markup=get_back_keyboard()
                 )
                 return
 
             # ویرایش پشتیبان
             if text == '👤 ویرایش پشتیبان':
                 user_data[uid] = {'step': 'edit_support'}
-                await update.message.reply_text(
+                update.message.reply_text(
                     "👤 آیدی جدید پشتیبانی را وارد کنید (مثال: @Support_Admin):",
                     reply_markup=get_back_keyboard()
                 )
@@ -370,7 +449,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # ویرایش کانال آموزش
             if text == '📢 ویرایش کانال آموزش':
                 user_data[uid] = {'step': 'edit_guide'}
-                await update.message.reply_text(
+                update.message.reply_text(
                     "📢 آیدی جدید کانال آموزش را وارد کنید (مثال: @Guide_Channel):",
                     reply_markup=get_back_keyboard()
                 )
@@ -382,7 +461,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     ['ویرایش شماره کارت', 'ویرایش نام صاحب کارت'],
                     ['🔙 بازگشت به منوی اصلی']
                 ]
-                await update.message.reply_text(
+                update.message.reply_text(
                     "💳 چه اطلاعاتی را ویرایش می‌کنید؟",
                     reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
                 )
@@ -391,7 +470,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # ویرایش برند
             if text == '🏷 ویرایش برند':
                 user_data[uid] = {'step': 'edit_brand'}
-                await update.message.reply_text(
+                update.message.reply_text(
                     "🏷 نام جدید برند را وارد کنید:",
                     reply_markup=get_back_keyboard()
                 )
@@ -405,7 +484,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 today = datetime.now().strftime("%Y-%m-%d")
                 today_users = sum(1 for u in db["users"].values() if u.get("joined_date", "").startswith(today))
                 
-                # آمار دسته‌بندی‌ها
                 categories_stats = ""
                 for cat, plans in db["categories"].items():
                     categories_stats += f"• {cat}: {len(plans)} پلن\n"
@@ -420,19 +498,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"━━━━━━━━━━━━━━━\n"
                     f"📦 <b>دسته‌بندی‌ها:</b>\n{categories_stats}"
                 )
-                await update.message.reply_text(stats, parse_mode='HTML')
+                update.message.reply_text(stats, parse_mode='HTML')
                 return
 
             # ارسال همگانی
             if text == '📨 ارسال همگانی':
                 user_data[uid] = {'step': 'broadcast'}
-                await update.message.reply_text(
+                update.message.reply_text(
                     "📨 پیام مورد نظر برای ارسال همگانی را ارسال کنید:",
                     reply_markup=get_back_keyboard()
                 )
                 return
 
-            # افزودن پلن - مرحله انتخاب دسته
+            # افزودن پلن
             if text == '➕ افزودن پلن':
                 categories = list(db["categories"].keys())
                 keyboard = []
@@ -441,13 +519,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 keyboard.append(['🔙 بازگشت به منوی اصلی'])
                 
                 user_data[uid] = {'step': 'add_plan_category'}
-                await update.message.reply_text(
+                update.message.reply_text(
                     "📂 لطفاً دسته‌بندی مورد نظر برای افزودن پلن را انتخاب کنید:",
                     reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
                 )
                 return
 
-            # حذف پلن - نمایش لیست پلن‌ها
+            # حذف پلن
             if text == '➖ حذف پلن':
                 keyboard = []
                 for cat, plans in db["categories"].items():
@@ -456,51 +534,87 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"delplan_{plan['id']}")])
                 
                 if keyboard:
-                    await update.message.reply_text(
+                    update.message.reply_text(
                         "🗑 پلن مورد نظر برای حذف را انتخاب کنید:",
                         reply_markup=InlineKeyboardMarkup(keyboard)
                     )
                 else:
-                    await update.message.reply_text("❌ هیچ پلنی برای حذف وجود ندارد.")
+                    update.message.reply_text("❌ هیچ پلنی برای حذف وجود ندارد.")
                 return
 
-            # مراحل ویرایش
+            # مراحل ویرایش متن
+            text_map = {
+                'ویرایش متن خوش‌آمدگویی': 'welcome',
+                'ویرایش متن پشتیبانی': 'support',
+                'ویرایش متن آموزش': 'guide',
+                'ویرایش متن تست': 'test',
+                'ویرایش متن عضویت': 'force_join'
+            }
+            
+            if text in text_map:
+                user_data[uid] = {'step': f'edit_{text_map[text]}'}
+                update.message.reply_text(
+                    f"📝 متن جدید را ارسال کنید:",
+                    reply_markup=get_back_keyboard()
+                )
+                return
+
+            if step and step.startswith('edit_'):
+                key = step.replace('edit_', '')
+                db["texts"][key] = text
+                save_db(db)
+                update.message.reply_text("✅ متن با موفقیت ویرایش شد.", reply_markup=get_admin_menu())
+                user_data[uid] = {}
+                return
+
+            # مراحل تنظیمات
+            if step == 'set_channel_link':
+                db["channel_link"] = text
+                # استخراج آیدی کانال از لینک
+                if 't.me/' in text:
+                    channel = text.split('t.me/')[-1].split('/')[0]
+                    db["force_join"]["channel"] = f"@{channel}"
+                save_db(db)
+                update.message.reply_text("✅ لینک کانال ذخیره شد.", reply_markup=get_admin_menu())
+                user_data[uid] = {}
+                return
+
             if step == 'edit_support':
                 db["support_id"] = text
                 save_db(db)
+                update.message.reply_text("✅ آیدی پشتیبانی ویرایش شد.", reply_markup=get_admin_menu())
                 user_data[uid] = {}
-                await update.message.reply_text("✅ آیدی پشتیبانی ویرایش شد.", reply_markup=get_admin_menu())
                 return
 
             if step == 'edit_guide':
                 db["guide_channel"] = text
                 save_db(db)
+                update.message.reply_text("✅ کانال آموزش ویرایش شد.", reply_markup=get_admin_menu())
                 user_data[uid] = {}
-                await update.message.reply_text("✅ کانال آموزش ویرایش شد.", reply_markup=get_admin_menu())
                 return
 
             if step == 'edit_brand':
                 db["brand"] = text
                 save_db(db)
+                update.message.reply_text("✅ نام برند ویرایش شد.", reply_markup=get_admin_menu())
                 user_data[uid] = {}
-                await update.message.reply_text("✅ نام برند ویرایش شد.", reply_markup=get_admin_menu())
                 return
 
             if step == 'edit_card_number':
                 if text.isdigit() and len(text) == 16:
                     db["card"]["number"] = text
                     save_db(db)
-                    await update.message.reply_text("✅ شماره کارت ویرایش شد.", reply_markup=get_admin_menu())
+                    update.message.reply_text("✅ شماره کارت ویرایش شد.", reply_markup=get_admin_menu())
                 else:
-                    await update.message.reply_text("❌ شماره کارت نامعتبر!")
+                    update.message.reply_text("❌ شماره کارت نامعتبر!")
                 user_data[uid] = {}
                 return
 
             if step == 'edit_card_name':
                 db["card"]["name"] = text
                 save_db(db)
+                update.message.reply_text("✅ نام صاحب کارت ویرایش شد.", reply_markup=get_admin_menu())
                 user_data[uid] = {}
-                await update.message.reply_text("✅ نام صاحب کارت ویرایش شد.", reply_markup=get_admin_menu())
                 return
 
             if step == 'broadcast':
@@ -508,12 +622,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 failed = 0
                 for user_id in db["users"].keys():
                     try:
-                        await context.bot.send_message(int(user_id), text)
+                        context.bot.send_message(int(user_id), text)
                         success += 1
                     except:
                         failed += 1
                 
-                await update.message.reply_text(
+                update.message.reply_text(
                     f"✅ ارسال همگانی انجام شد.\n✓ موفق: {success}\n✗ ناموفق: {failed}",
                     reply_markup=get_admin_menu()
                 )
@@ -524,7 +638,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if step == 'add_plan_category' and text in db["categories"]:
                 user_data[uid]['category'] = text
                 user_data[uid]['step'] = 'add_plan_name'
-                await update.message.reply_text(
+                update.message.reply_text(
                     "📝 نام پلن را وارد کنید (مثال: ⚡️ پلن ویژه 50GB):",
                     reply_markup=get_back_keyboard()
                 )
@@ -533,13 +647,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if step == 'add_plan_name':
                 user_data[uid]['plan_name'] = text
                 user_data[uid]['step'] = 'add_plan_volume'
-                await update.message.reply_text("📦 حجم پلن را وارد کنید (مثال: 50GB):")
+                update.message.reply_text("📦 حجم پلن را وارد کنید (مثال: 50GB):")
                 return
 
             if step == 'add_plan_volume':
                 user_data[uid]['volume'] = text
                 user_data[uid]['step'] = 'add_plan_users'
-                await update.message.reply_text("👥 تعداد کاربران را وارد کنید (عدد):")
+                update.message.reply_text("👥 تعداد کاربران را وارد کنید (عدد):")
                 return
 
             if step == 'add_plan_users':
@@ -547,9 +661,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     users = int(text)
                     user_data[uid]['users'] = users
                     user_data[uid]['step'] = 'add_plan_days'
-                    await update.message.reply_text("⏳ مدت اعتبار را به روز وارد کنید (عدد):")
+                    update.message.reply_text("⏳ مدت اعتبار را به روز وارد کنید (عدد):")
                 except ValueError:
-                    await update.message.reply_text("❌ لطفاً یک عدد معتبر وارد کنید!")
+                    update.message.reply_text("❌ لطفاً یک عدد معتبر وارد کنید!")
                 return
 
             if step == 'add_plan_days':
@@ -557,16 +671,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     days = int(text)
                     user_data[uid]['days'] = days
                     user_data[uid]['step'] = 'add_plan_price'
-                    await update.message.reply_text("💰 قیمت را به تومان وارد کنید (عدد):")
+                    update.message.reply_text("💰 قیمت را به هزار تومان وارد کنید (عدد):")
                 except ValueError:
-                    await update.message.reply_text("❌ لطفاً یک عدد معتبر وارد کنید!")
+                    update.message.reply_text("❌ لطفاً یک عدد معتبر وارد کنید!")
                 return
 
             if step == 'add_plan_price':
                 try:
                     price = int(text)
                     
-                    # پیدا کردن بزرگترین id
                     max_id = 0
                     for plans in db["categories"].values():
                         for p in plans:
@@ -586,14 +699,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     db["categories"][category].append(new_plan)
                     save_db(db)
                     
-                    await update.message.reply_text(
+                    update.message.reply_text(
                         f"✅ پلن با موفقیت به دسته {category} اضافه شد!",
                         reply_markup=get_admin_menu()
                     )
                     user_data[uid] = {}
                     
                 except Exception as e:
-                    await update.message.reply_text(f"❌ خطا: {e}")
+                    update.message.reply_text(f"❌ خطا: {e}")
                 return
 
             # دریافت کانفیگ برای ارسال
@@ -621,9 +734,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ]])
                 
                 try:
-                    await context.bot.send_message(int(target), config_msg, parse_mode='HTML', reply_markup=keyboard)
+                    context.bot.send_message(int(target), config_msg, parse_mode='HTML', reply_markup=keyboard)
                     
-                    # ثبت در سرویس‌های من
                     service_record = f"🚀 {name} | {vol} | {datetime.now().strftime('%Y-%m-%d')}"
                     if str(target) not in db["users"]:
                         db["users"][str(target)] = {"purchases": []}
@@ -634,9 +746,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     db["users"][str(target)]["purchases"].append(service_record)
                     save_db(db)
                     
-                    await update.message.reply_text("✅ کانفیگ با موفقیت ارسال شد.", reply_markup=get_main_menu(uid))
+                    update.message.reply_text("✅ کانفیگ با موفقیت ارسال شد.", reply_markup=get_main_menu(uid))
                 except Exception as e:
-                    await update.message.reply_text(f"❌ خطا در ارسال: {str(e)}")
+                    update.message.reply_text(f"❌ خطا در ارسال: {str(e)}")
                 
                 user_data[uid] = {}
                 return
@@ -656,7 +768,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"📊 <b>حجم:</b> {plan['volume']}\n"
                 f"{users_text}\n"
                 f"⏳ <b>مدت:</b> {plan['days']} روز\n"
-                f"💰 <b>مبلغ:</b> {plan['price']:,} تومان\n"
+                f"💰 <b>مبلغ:</b> {plan['price'] * 1000:,} تومان\n"
                 f"━━━━━━━━━━━━━━━━━━━━"
             )
             
@@ -664,27 +776,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("✅ تایید و دریافت کارت", callback_data="show_card")
             ]])
             
-            await update.message.reply_text(invoice, parse_mode='HTML', reply_markup=keyboard)
+            update.message.reply_text(invoice, parse_mode='HTML', reply_markup=keyboard)
             return
 
     except Exception as e:
         logger.error(f"Error in handle_message: {e}")
         logger.error(traceback.format_exc())
-        await update.message.reply_text("خطایی رخ داد. لطفاً دوباره تلاش کنید.")
+        update.message.reply_text("خطایی رخ داد. لطفاً دوباره تلاش کنید.")
 
 # --- مدیریت کالبک‌ها ---
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def handle_callback(update, context):
     """هندلر کالبک‌های دکمه‌های شیشه‌ای"""
     try:
         query = update.callback_query
         uid = str(query.from_user.id)
-        await query.answer()
+        query.answer()
+
+        # بررسی عضویت
+        if query.data == "check_join":
+            if check_force_join(uid, context):
+                query.message.delete()
+                start(update, context)
+            else:
+                query.message.reply_text("❌ شما هنوز عضو کانال نشده‌اید. لطفاً ابتدا عضو شوید.")
+            return
 
         # خرید پلن
         if query.data.startswith("buy_"):
             plan_id = int(query.data.split("_")[1])
             
-            # پیدا کردن پلن در همه دسته‌ها
             plan = None
             plan_category = None
             for cat, plans in db["categories"].items():
@@ -698,21 +818,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             if plan:
                 user_data[uid] = {'step': 'wait_name', 'plan': plan, 'category': plan_category}
-                await query.message.reply_text(
+                query.message.reply_text(
                     "📝 لطفاً نام دلخواه برای اکانت خود وارد کنید:",
                     reply_markup=get_back_keyboard()
                 )
             else:
-                await query.message.reply_text("❌ پلن مورد نظر یافت نشد.")
+                query.message.reply_text("❌ پلن مورد نظر یافت نشد.")
 
         # نمایش کارت
         elif query.data == "show_card":
             if uid not in user_data or 'plan' not in user_data[uid]:
-                await query.message.reply_text("❌ خطا در اطلاعات خرید. دوباره تلاش کنید.")
+                query.message.reply_text("❌ خطا در اطلاعات خرید. دوباره تلاش کنید.")
                 return
             
             plan = user_data[uid]['plan']
-            price = plan['price'] * 1000  # تبدیل به تومان
+            price = plan['price'] * 1000
             
             card_msg = (
                 f"💳 <b>اطلاعات واریز</b>\n"
@@ -729,18 +849,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("📤 ارسال فیش", callback_data="send_receipt")
             ]])
             
-            await query.message.reply_text(card_msg, parse_mode='HTML', reply_markup=keyboard)
+            query.message.reply_text(card_msg, parse_mode='HTML', reply_markup=keyboard)
 
         # ارسال فیش
         elif query.data == "send_receipt":
             if 'plan' in user_data[uid]:
                 user_data[uid]['step'] = 'wait_photo'
-                await query.message.reply_text(
+                query.message.reply_text(
                     "📸 لطفاً عکس فیش واریزی را ارسال کنید:",
                     reply_markup=get_back_keyboard()
                 )
             else:
-                await query.message.reply_text("❌ اطلاعات خرید یافت نشد. دوباره از ابتدا شروع کنید.")
+                query.message.reply_text("❌ اطلاعات خرید یافت نشد. دوباره از ابتدا شروع کنید.")
 
         # تمدید سرویس
         elif query.data.startswith("renew_"):
@@ -750,11 +870,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if index < len(purchases):
                 service = purchases[index]
                 
-                # پیدا کردن پلن مشابه
                 similar_plan = None
                 for cat, plans in db["categories"].items():
                     for plan in plans:
-                        if plan['volume'] in service or plan['name'].split()[-1] in service:
+                        if plan['volume'] in service or any(word in service for word in plan['name'].split()):
                             similar_plan = plan
                             break
                     if similar_plan:
@@ -767,23 +886,22 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         f"🔄 <b>تمدید سرویس</b>\n"
                         f"━━━━━━━━━━━━━━━━━━━━\n"
                         f"📦 <b>پلن:</b> {similar_plan['name']}\n"
-                        f"💰 <b>مبلغ تمدید:</b> {similar_plan['price']:,} تومان\n"
+                        f"💰 <b>مبلغ تمدید:</b> {similar_plan['price'] * 1000:,} تومان\n"
                         f"━━━━━━━━━━━━━━━━━━━━\n"
                         f"📝 لطفاً نام اکانت را وارد کنید:"
                     )
                     
-                    await query.message.reply_text(renew_msg, parse_mode='HTML')
+                    query.message.reply_text(renew_msg, parse_mode='HTML')
                 else:
-                    await query.message.reply_text("❌ پلن مشابه برای تمدید یافت نشد. لطفاً از خرید جدید استفاده کنید.")
+                    query.message.reply_text("❌ پلن مشابه برای تمدید یافت نشد. لطفاً از خرید جدید استفاده کنید.")
             else:
-                await query.message.reply_text("❌ سرویس مورد نظر یافت نشد.")
+                query.message.reply_text("❌ سرویس مورد نظر یافت نشد.")
 
         # حذف پلن توسط ادمین
         elif query.data.startswith("delplan_"):
             if str(uid) == str(ADMIN_ID):
                 plan_id = int(query.data.split("_")[1])
                 
-                # پیدا کردن و حذف پلن
                 deleted = False
                 for cat, plans in db["categories"].items():
                     for i, plan in enumerate(plans):
@@ -796,9 +914,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 if deleted:
                     save_db(db)
-                    await query.message.reply_text("✅ پلن با موفقیت حذف شد.", reply_markup=get_admin_menu())
+                    query.message.reply_text("✅ پلن با موفقیت حذف شد.", reply_markup=get_admin_menu())
                 else:
-                    await query.message.reply_text("❌ پلن یافت نشد.")
+                    query.message.reply_text("❌ پلن یافت نشد.")
 
         # ارسال تست توسط ادمین
         elif query.data.startswith("send_test_"):
@@ -815,12 +933,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         'vol': "3 ساعت"
                     }
                     
-                    await context.bot.send_message(
+                    context.bot.send_message(
                         ADMIN_ID,
                         f"📨 لطفاً کانفیگ تست برای کاربر {name} را ارسال کنید:"
                     )
                     
-                    await query.message.edit_reply_markup(reply_markup=None)  # حذف دکمه
+                    query.message.edit_reply_markup(reply_markup=None)
 
         # ارسال کانفیگ خرید توسط ادمین
         elif query.data.startswith("send_config_"):
@@ -829,7 +947,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if len(parts) >= 3:
                     target = parts[2]
                     
-                    # پیدا کردن اطلاعات از پیام
                     if query.message.caption:
                         lines = query.message.caption.split('\n')
                         name = "کاربر"
@@ -848,34 +965,33 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         'vol': vol
                     }
                     
-                    await context.bot.send_message(
+                    context.bot.send_message(
                         ADMIN_ID,
                         f"📨 لطفاً کانفیگ سرویس {name} را ارسال کنید:"
                     )
                     
-                    await query.message.edit_reply_markup(reply_markup=None)
+                    query.message.edit_reply_markup(reply_markup=None)
 
     except Exception as e:
         logger.error(f"Error in handle_callback: {e}")
         logger.error(traceback.format_exc())
-        await query.message.reply_text("خطایی رخ داد. لطفاً دوباره تلاش کنید.")
+        query.message.reply_text("خطایی رخ داد. لطفاً دوباره تلاش کنید.")
 
 # --- مدیریت دریافت عکس (فیش واریزی) ---
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def handle_photo(update, context):
     """هندلر دریافت عکس"""
     try:
         uid = str(update.effective_user.id)
         
         if user_data.get(uid, {}).get('step') == 'wait_photo':
             if 'plan' not in user_data[uid] or 'account_name' not in user_data[uid]:
-                await update.message.reply_text("❌ اطلاعات خرید یافت نشد. دوباره از ابتدا شروع کنید.")
+                update.message.reply_text("❌ اطلاعات خرید یافت نشد. دوباره از ابتدا شروع کنید.")
                 return
             
             account_name = user_data[uid]['account_name']
             plan = user_data[uid]['plan']
             category = user_data[uid].get('category', 'نامشخص')
             
-            # ارسال به ادمین
             caption = (
                 f"💰 <b>فیش واریزی جدید</b>\n"
                 f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -887,7 +1003,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"📦 <b>پلن:</b> {plan['name']}\n"
                 f"📊 <b>حجم:</b> {plan['volume']}\n"
                 f"👥 <b>تعداد کاربران:</b> {plan['users']}\n"
-                f"💰 <b>مبلغ:</b> {plan['price']:,} تومان\n"
+                f"💰 <b>مبلغ:</b> {plan['price'] * 1000:,} تومان\n"
                 f"👤 <b>نام اکانت:</b> {account_name}\n"
                 f"━━━━━━━━━━━━━━━━━━━━"
             )
@@ -897,7 +1013,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 callback_data=f"send_config_{uid}"
             )]]
             
-            await context.bot.send_photo(
+            context.bot.send_photo(
                 ADMIN_ID,
                 update.message.photo[-1].file_id,
                 caption=caption,
@@ -905,22 +1021,21 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup(btn)
             )
             
-            await update.message.reply_text(
+            update.message.reply_text(
                 "✅ فیش شما با موفقیت ارسال شد.\n"
                 "به زودی پس از تایید، سرویس برای شما ارسال می‌شود.",
                 reply_markup=get_main_menu(uid)
             )
             
-            # پاک کردن اطلاعات موقت
             if uid in user_data:
                 del user_data[uid]
 
     except Exception as e:
         logger.error(f"Error in handle_photo: {e}")
-        await update.message.reply_text("خطایی رخ داد. لطفاً دوباره تلاش کنید.")
+        update.message.reply_text("خطایی رخ داد. لطفاً دوباره تلاش کنید.")
 
 # --- اجرای اصلی ---
-async def main():
+def main():
     """تابع اصلی"""
     try:
         logger.info("Starting bot...")
@@ -930,24 +1045,25 @@ async def main():
         web_thread.start()
         logger.info("Web server started")
         
-        # ساخت ربات
-        app = Application.builder().token(TOKEN).build()
+        # ساخت ربات با Updater (نسخه پایدار)
+        updater = Updater(TOKEN, use_context=True)
+        dp = updater.dispatcher
         
         # اضافه کردن هندلرها
-        app.add_handler(CommandHandler("start", start))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-        app.add_handler(CallbackQueryHandler(handle_callback))
+        dp.add_handler(CommandHandler("start", start))
+        dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+        dp.add_handler(MessageHandler(Filters.photo, handle_photo))
+        dp.add_handler(CallbackQueryHandler(handle_callback))
         
         logger.info("Bot started successfully!")
         
         # شروع ربات
-        await app.run_polling()
+        updater.start_polling()
+        updater.idle()
         
     except Exception as e:
         logger.error(f"Error in main: {e}")
         logger.error(traceback.format_exc())
 
 if __name__ == '__main__':
-    import asyncio
-    asyncio.run(main())
+    main()
