@@ -76,13 +76,13 @@ def load_db():
         "support": "@Support_Admin",
         "guide": "@Guide_Channel",
         "categories": DEFAULT_PLANS.copy(),
-        "force_join": {"enabled": False, "channel": "", "link": ""},
+        "force_join": {"enabled": False, "channel_id": "", "channel_link": "", "channel_username": ""},
         "texts": {
             "welcome": "🔰 به {brand} خوش آمدید\n\n✅ فروش ویژه فیلترشکن\n✅ پشتیبانی 24 ساعته\n✅ نصب آسان",
             "support": "🆘 پشتیبانی: {support}",
             "guide": "📚 آموزش: {guide}",
             "test": "🎁 درخواست تست شما ثبت شد",
-            "force": "🔒 برای استفاده عضو کانال شوید:\n{link}"
+            "force": "🔒 برای استفاده از ربات باید در کانال زیر عضو شوید:\n{link}\n\nپس از عضویت، دکمه ✅ تایید را بزنید."
         }
     }
 
@@ -123,18 +123,45 @@ def admin_menu():
     ]
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
-# --- بررسی عضویت ---
+# --- بررسی عضویت (اصلاح شده) ---
 def check_join(user_id, context):
-    if not db["force_join"]["enabled"] or not db["force_join"]["channel"]:
+    """بررسی عضویت کاربر در کانال"""
+    if not db["force_join"]["enabled"]:
         return True
+        
+    channel_id = db["force_join"].get("channel_id", "")
+    channel_username = db["force_join"].get("channel_username", "")
+    
+    if not channel_id and not channel_username:
+        return True
+    
     try:
-        member = context.bot.get_chat_member(
-            chat_id=db["force_join"]["channel"],
-            user_id=int(user_id)
-        )
-        return member.status in ['member', 'administrator', 'creator']
-    except:
-        return False
+        # اول با آیدی عددی تلاش کن
+        if channel_id:
+            try:
+                member = context.bot.get_chat_member(
+                    chat_id=int(channel_id),
+                    user_id=int(user_id)
+                )
+                return member.status in ['member', 'administrator', 'creator']
+            except:
+                pass
+        
+        # بعد با یوزرنیم تلاش کن
+        if channel_username:
+            member = context.bot.get_chat_member(
+                chat_id=channel_username,
+                user_id=int(user_id)
+            )
+            return member.status in ['member', 'administrator', 'creator']
+            
+    except Exception as e:
+        logger.error(f"❌ Error checking join: {e}")
+        # اگر خطای 400 یعنی کاربر اصلاً عضو نیست
+        if "400" in str(e):
+            return False
+    
+    return False
 
 # --- استارت ---
 def start(update, context):
@@ -153,13 +180,13 @@ def start(update, context):
     user_data[uid] = {}
     
     # بررسی عضویت اجباری
-    if db["force_join"]["enabled"] and db["force_join"]["channel"]:
+    if db["force_join"]["enabled"] and db["force_join"]["channel_link"]:
         if not check_join(uid, context):
             btn = InlineKeyboardMarkup([[
-                InlineKeyboardButton("📢 عضویت", url=db["force_join"]["link"]),
-                InlineKeyboardButton("✅ تایید", callback_data="join_check")
+                InlineKeyboardButton("📢 عضویت در کانال", url=db["force_join"]["channel_link"]),
+                InlineKeyboardButton("✅ تایید عضویت", callback_data="join_check")
             ]])
-            msg = db["texts"]["force"].format(link=db["force_join"]["link"])
+            msg = db["texts"]["force"].format(link=db["force_join"]["channel_link"])
             update.message.reply_text(msg, reply_markup=btn)
             return
     
@@ -176,14 +203,14 @@ def handle_msg(update, context):
         step = user_data.get(uid, {}).get('step')
 
         # بررسی عضویت
-        if db["force_join"]["enabled"] and db["force_join"]["channel"]:
+        if db["force_join"]["enabled"] and db["force_join"]["channel_link"]:
             if not check_join(uid, context) and text != '/start':
                 btn = InlineKeyboardMarkup([[
-                    InlineKeyboardButton("📢 عضویت", url=db["force_join"]["link"]),
-                    InlineKeyboardButton("✅ تایید", callback_data="join_check")
+                    InlineKeyboardButton("📢 عضویت در کانال", url=db["force_join"]["channel_link"]),
+                    InlineKeyboardButton("✅ تایید عضویت", callback_data="join_check")
                 ]])
                 update.message.reply_text(
-                    db["texts"]["force"].format(link=db["force_join"]["link"]),
+                    db["texts"]["force"].format(link=db["force_join"]["channel_link"]),
                     reply_markup=btn
                 )
                 return
@@ -323,36 +350,46 @@ def handle_msg(update, context):
                 update.message.reply_text("نام برند را بفرستید:", reply_markup=back_btn())
                 return
 
-            # عضویت اجباری
+            # عضویت اجباری (اصلاح شده)
             if text == '🔒 عضویت':
                 keyboard = [
-                    ['فعال', 'غیرفعال'],
-                    ['تنظیم لینک'],
+                    ['✅ فعال کردن', '❌ غیرفعال کردن'],
+                    ['🔗 تنظیم لینک کانال'],
                     ['🔙 برگشت']
                 ]
                 status = "✅ فعال" if db["force_join"]["enabled"] else "❌ غیرفعال"
-                channel = db["force_join"]["channel"] or "ندارد"
+                channel = db["force_join"]["channel_username"] or "تنظیم نشده"
                 update.message.reply_text(
-                    f"وضعیت: {status}\nکانال: {channel}",
+                    f"🔒 وضعیت عضویت اجباری:\n"
+                    f"وضعیت: {status}\n"
+                    f"کانال: {channel}\n\n"
+                    "برای تنظیم، ابتدا لینک کانال را وارد کنید.",
                     reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
                 )
                 return
 
-            if text == 'فعال':
-                db["force_join"]["enabled"] = True
-                save_db(db)
-                update.message.reply_text("✅ فعال شد", reply_markup=admin_menu())
+            if text == '✅ فعال کردن':
+                if db["force_join"]["channel_link"] and db["force_join"]["channel_username"]:
+                    db["force_join"]["enabled"] = True
+                    save_db(db)
+                    update.message.reply_text("✅ عضویت اجباری فعال شد", reply_markup=admin_menu())
+                else:
+                    update.message.reply_text("❌ ابتدا لینک کانال را تنظیم کنید")
                 return
 
-            if text == 'غیرفعال':
+            if text == '❌ غیرفعال کردن':
                 db["force_join"]["enabled"] = False
                 save_db(db)
-                update.message.reply_text("✅ غیرفعال شد", reply_markup=admin_menu())
+                update.message.reply_text("✅ عضویت اجباری غیرفعال شد", reply_markup=admin_menu())
                 return
 
-            if text == 'تنظیم لینک':
+            if text == '🔗 تنظیم لینک کانال':
                 user_data[uid] = {'step': 'set_link'}
-                update.message.reply_text("لینک کانال را بفرستید:", reply_markup=back_btn())
+                update.message.reply_text(
+                    "🔗 لینک کانال را بفرستید (مثال: https://t.me/mychannel):\n\n"
+                    "⚠️ نکته: ربات باید در کانال ادمین باشد!",
+                    reply_markup=back_btn()
+                )
                 return
 
             # متن‌ها
@@ -470,12 +507,28 @@ def handle_msg(update, context):
                 return
 
             if step == 'set_link':
-                db["force_join"]["link"] = text
+                # ذخیره لینک
+                db["force_join"]["channel_link"] = text
+                
+                # استخراج یوزرنیم کانال از لینک
                 if 't.me/' in text:
-                    ch = text.split('t.me/')[-1].split('/')[0]
-                    db["force_join"]["channel"] = f"@{ch}"
+                    username = text.split('t.me/')[-1].split('/')[0].replace('@', '')
+                    db["force_join"]["channel_username"] = f"@{username}"
+                    
+                    # تلاش برای گرفتن آیدی عددی
+                    try:
+                        chat = context.bot.get_chat(f"@{username}")
+                        db["force_join"]["channel_id"] = str(chat.id)
+                        update.message.reply_text(f"✅ کانال شناسایی شد: {chat.title}")
+                    except Exception as e:
+                        logger.error(f"Error getting chat: {e}")
+                        update.message.reply_text(
+                            f"⚠️ لینک ذخیره شد اما ربات در کانال ادمین نیست!\n"
+                            f"لطفاً ربات را به کانال اضافه کنید و ادمینش کنید."
+                        )
+                
                 save_db(db)
-                update.message.reply_text("✅ لینک ذخیره شد", reply_markup=admin_menu())
+                update.message.reply_text("✅ لینک کانال ذخیره شد", reply_markup=admin_menu())
                 user_data[uid] = {}
                 return
 
@@ -613,19 +666,24 @@ def handle_msg(update, context):
         logger.error(f"Error: {e}")
         update.message.reply_text("❌ خطا، دوباره تلاش کنید")
 
-# --- کالبک ---
+# --- کالبک (اصلاح شده) ---
 def handle_cb(update, context):
     query = update.callback_query
     uid = str(query.from_user.id)
     query.answer()
 
-    # بررسی عضویت
+    # بررسی عضویت (اصلاح شده)
     if query.data == "join_check":
         if check_join(uid, context):
             query.message.delete()
-            start(update, context)
+            # ارسال پیام خوش‌آمدگویی
+            welcome = db["texts"]["welcome"].format(brand=db["brand"])
+            context.bot.send_message(uid, welcome, reply_markup=main_menu(uid))
         else:
-            query.message.reply_text("❌ هنوز عضو نشده‌اید")
+            query.message.reply_text(
+                "❌ شما هنوز عضو کانال نشده‌اید!\n"
+                "لطفاً ابتدا عضو شوید سپس دکمه تایید را بزنید."
+            )
         return
 
     # خرید
