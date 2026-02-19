@@ -38,7 +38,7 @@ def run_web():
         logger.error(f"❌ Web server error: {e}")
 
 # --- توکن و آیدی ادمین ---
-TOKEN = '8305364438:AAGAT39wGQey9tzxMVafEiRRXz1eGNvpfhY'
+TOKEN = '8305364438:AAGAT39wGQey9tzxMVafEiRReGNvpfhY'
 ADMIN_ID = 1374345602
 
 # --- مسیر دیتابیس ---
