@@ -481,6 +481,45 @@ def handle_msg(update, context):
                 update.message.reply_text("✏️ دکمه مورد نظر را انتخاب کنید:", reply_markup=InlineKeyboardMarkup(keyboard))
                 return
 
+            # ========== بخش جدید: ترتیب دکمه‌ها ==========
+            if text == '🔁 ترتیب دکمه‌ها':
+                menu_text = "🔁 ترتیب فعلی دکمه‌ها:\n"
+                for i, btn in enumerate(db["menu_buttons"], 1):
+                    menu_text += f"{i}. {btn['text']}\n"
+                
+                menu_text += "\nبرای تغییر ترتیب، شماره دکمه‌ها رو به ترتیب جدید بفرستید.\n"
+                menu_text += "مثال: 2,1,3,4,5,6,7,8,9"
+                
+                user_data[uid] = {'step': 'reorder_menu'}
+                update.message.reply_text(menu_text, reply_markup=back_btn())
+                return
+
+            if step == 'reorder_menu':
+                try:
+                    new_order = [int(x.strip()) for x in text.split(',')]
+                    
+                    if len(new_order) != len(db["menu_buttons"]):
+                        update.message.reply_text("❌ تعداد اعداد با تعداد دکمه‌ها هماهنگ نیست!")
+                        return
+                    
+                    if sorted(new_order) != list(range(1, len(db["menu_buttons"]) + 1)):
+                        update.message.reply_text(f"❌ اعداد باید از ۱ تا {len(db['menu_buttons'])} باشند!")
+                        return
+                    
+                    new_buttons = []
+                    for index in new_order:
+                        new_buttons.append(db["menu_buttons"][index - 1])
+                    
+                    db["menu_buttons"] = new_buttons
+                    save_db(db)
+                    
+                    update.message.reply_text("✅ ترتیب دکمه‌ها با موفقیت تغییر کرد!", reply_markup=get_admin_menu())
+                    user_data[uid] = {}
+                    
+                except Exception as e:
+                    update.message.reply_text(f"❌ خطا: {e}")
+                return
+
             if text == '📦 مدیریت دسته‌ها':
                 keyboard = [['➕ دسته جدید', '➖ حذف دسته'], ['✏️ ویرایش دسته', '🔁 ترتیب دسته‌ها'], ['🔙 برگشت']]
                 cats_text = "📦 دسته‌بندی‌های فعلی:\n"
@@ -814,6 +853,80 @@ def handle_msg(update, context):
                     update.message.reply_text("❌ هیچ پلنی وجود ندارد.")
                 return
 
+            # ========== بخش جدید: ویرایش پلن (مراحل) ==========
+            if step == 'edit_plan':
+                plan = user_data[uid]['plan']
+                cat = user_data[uid]['cat']
+                
+                if text == 'نام':
+                    user_data[uid]['edit_field'] = 'name'
+                    user_data[uid]['step'] = 'edit_plan_field'
+                    update.message.reply_text(f"📝 نام جدید برای پلن '{plan['name']}':", reply_markup=back_btn())
+                
+                elif text == 'حجم':
+                    user_data[uid]['edit_field'] = 'volume'
+                    user_data[uid]['step'] = 'edit_plan_field'
+                    update.message.reply_text(f"📦 حجم جدید برای پلن '{plan['name']}' (مثال: 50GB):", reply_markup=back_btn())
+                
+                elif text == 'کاربران':
+                    user_data[uid]['edit_field'] = 'users'
+                    user_data[uid]['step'] = 'edit_plan_field'
+                    update.message.reply_text(f"👥 تعداد کاربران جدید (عدد یا 'نامحدود'):", reply_markup=back_btn())
+                
+                elif text == 'مدت':
+                    user_data[uid]['edit_field'] = 'days'
+                    user_data[uid]['step'] = 'edit_plan_field'
+                    update.message.reply_text(f"⏳ مدت اعتبار جدید (روز):", reply_markup=back_btn())
+                
+                elif text == 'قیمت':
+                    user_data[uid]['edit_field'] = 'price'
+                    user_data[uid]['step'] = 'edit_plan_field'
+                    update.message.reply_text(f"💰 قیمت جدید (هزار تومان):", reply_markup=back_btn())
+                
+                elif text == '🔙 برگشت':
+                    user_data[uid] = {}
+                    update.message.reply_text("🛠 پنل مدیریت:", reply_markup=get_admin_menu())
+                
+                return
+
+            if step == 'edit_plan_field':
+                plan = user_data[uid]['plan']
+                cat = user_data[uid]['cat']
+                field = user_data[uid]['edit_field']
+                
+                for i, p in enumerate(db["categories"][cat]):
+                    if p["id"] == plan["id"]:
+                        if field == 'users':
+                            if text.isdigit() or text == "نامحدود":
+                                db["categories"][cat][i][field] = text if text == "نامحدود" else int(text)
+                                save_db(db)
+                                update.message.reply_text("✅ پلن با موفقیت ویرایش شد!", reply_markup=get_admin_menu())
+                                user_data[uid] = {}
+                            else:
+                                update.message.reply_text("❌ لطفاً عدد یا 'نامحدود' وارد کنید!")
+                            return
+                        
+                        elif field in ['days', 'price']:
+                            try:
+                                db["categories"][cat][i][field] = int(text)
+                                save_db(db)
+                                update.message.reply_text("✅ پلن با موفقیت ویرایش شد!", reply_markup=get_admin_menu())
+                                user_data[uid] = {}
+                            except:
+                                update.message.reply_text("❌ لطفاً عدد وارد کنید!")
+                            return
+                        
+                        else:
+                            db["categories"][cat][i][field] = text
+                            save_db(db)
+                            update.message.reply_text("✅ پلن با موفقیت ویرایش شد!", reply_markup=get_admin_menu())
+                            user_data[uid] = {}
+                            return
+                
+                update.message.reply_text("❌ خطا در ویرایش پلن!")
+                user_data[uid] = {}
+                return
+
             if step == 'card_num':
                 if text.isdigit() and len(text) == 16:
                     db["card"]["number"] = text
@@ -1078,7 +1191,6 @@ def handle_cb(update, context):
                     service = purchases[index]
                     logger.info(f"🔄 تلاش برای تمدید سرویس: {service}")
                     
-                    # روش اول: پیدا کردن بر اساس حجم
                     service_volume = None
                     volume_list = ["10GB", "20GB", "30GB", "40GB", "50GB", "60GB", "100GB"]
                     
@@ -1089,7 +1201,6 @@ def handle_cb(update, context):
                     
                     similar_plan = None
                     
-                    # روش اول: بر اساس حجم
                     if service_volume:
                         for cat, plans in db["categories"].items():
                             for p in plans:
@@ -1100,11 +1211,9 @@ def handle_cb(update, context):
                             if similar_plan:
                                 break
                     
-                    # روش دوم: بر اساس کلمه (اگه با حجم پیدا نکرد)
                     if not similar_plan:
                         for cat, plans in db["categories"].items():
                             for p in plans:
-                                # چک کردن اسم پلن توی سرویس
                                 for word in p['name'].split():
                                     if len(word) > 3 and word in service:
                                         similar_plan = p
@@ -1115,14 +1224,12 @@ def handle_cb(update, context):
                             if similar_plan:
                                 break
                     
-                    # روش سوم: اولین پلن با کمترین قیمت (اگه هیچکدوم پیدا نشد)
                     if not similar_plan:
                         all_plans = []
                         for cat, plans in db["categories"].items():
                             all_plans.extend(plans)
                         
                         if all_plans:
-                            # ارزان‌ترین پلن رو انتخاب کن
                             similar_plan = min(all_plans, key=lambda x: x['price'])
                             logger.info(f"✅ ارزان‌ترین پلن به عنوان پیش‌فرض انتخاب شد: {similar_plan['name']}")
                     
@@ -1132,7 +1239,6 @@ def handle_cb(update, context):
                             InlineKeyboardButton(db["texts"]["back_button"], callback_data="back_to_categories")
                         ]])
                         
-                        # ساخت پیام مناسب
                         price_toman = similar_plan['price'] * 1000
                         service_short = service[:50] + "..." if len(service) > 50 else service
                         
@@ -1218,6 +1324,37 @@ def handle_cb(update, context):
                         query.message.edit_text("✅ پلن با موفقیت حذف شد.")
                     else:
                         query.message.edit_text("❌ پلن یافت نشد.")
+                except Exception as e:
+                    query.message.edit_text(f"❌ خطا: {e}")
+            return
+
+        if query.data.startswith("edit_plan_"):
+            if str(uid) == str(ADMIN_ID):
+                try:
+                    plan_id = int(query.data.split("_")[2])
+                    
+                    for cat, plans in db["categories"].items():
+                        for p in plans:
+                            if p["id"] == plan_id:
+                                user_data[uid] = {'step': 'edit_plan', 'plan': p, 'cat': cat}
+                                
+                                keyboard = [
+                                    ['نام', 'حجم', 'کاربران'],
+                                    ['مدت', 'قیمت'],
+                                    ['🔙 برگشت']
+                                ]
+                                query.message.edit_text(
+                                    f"✏️ ویرایش پلن {p['name']}\nچه چیزی را ویرایش کنیم؟",
+                                    reply_markup=None
+                                )
+                                context.bot.send_message(
+                                    uid,
+                                    "گزینه مورد نظر را انتخاب کنید:",
+                                    reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+                                )
+                                return
+                    
+                    query.message.edit_text("❌ پلن یافت نشد.")
                 except Exception as e:
                     query.message.edit_text(f"❌ خطا: {e}")
             return
