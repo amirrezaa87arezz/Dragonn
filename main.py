@@ -887,7 +887,7 @@ def handle_msg(update, context):
                     update.message.reply_text("❌ هیچ پلنی وجود ندارد.")
                 return
 
-            # ========== بخش اصلاح شده ویرایش پلن ==========
+            # ========== بخش ویرایش پلن (اصلاح شده نهایی) ==========
             if step == 'edit_plan':
                 try:
                     plan = user_data[uid]['plan']
@@ -895,31 +895,31 @@ def handle_msg(update, context):
                     
                     if text == 'نام':
                         user_data[uid]['edit_field'] = 'name'
-                        user_data[uid]['step'] = 'edit_plan_field'
+                        user_data[uid]['step'] = 'edit_plan_value'
                         update.message.reply_text(f"📝 نام جدید برای پلن '{plan['name']}' را وارد کنید:", reply_markup=back_btn())
                         return
                     
                     elif text == 'حجم':
                         user_data[uid]['edit_field'] = 'volume'
-                        user_data[uid]['step'] = 'edit_plan_field'
+                        user_data[uid]['step'] = 'edit_plan_value'
                         update.message.reply_text(f"📦 حجم جدید برای پلن '{plan['name']}' (مثال: 50GB):", reply_markup=back_btn())
                         return
                     
                     elif text == 'کاربران':
                         user_data[uid]['edit_field'] = 'users'
-                        user_data[uid]['step'] = 'edit_plan_field'
+                        user_data[uid]['step'] = 'edit_plan_value'
                         update.message.reply_text(f"👥 تعداد کاربران جدید (عدد یا 'نامحدود'):", reply_markup=back_btn())
                         return
                     
                     elif text == 'مدت':
                         user_data[uid]['edit_field'] = 'days'
-                        user_data[uid]['step'] = 'edit_plan_field'
+                        user_data[uid]['step'] = 'edit_plan_value'
                         update.message.reply_text(f"⏳ مدت اعتبار جدید (روز):", reply_markup=back_btn())
                         return
                     
                     elif text == 'قیمت':
                         user_data[uid]['edit_field'] = 'price'
-                        user_data[uid]['step'] = 'edit_plan_field'
+                        user_data[uid]['step'] = 'edit_plan_value'
                         update.message.reply_text(f"💰 قیمت جدید (هزار تومان):", reply_markup=back_btn())
                         return
                     
@@ -937,7 +937,7 @@ def handle_msg(update, context):
                     update.message.reply_text(f"❌ خطا: {e}")
                     return
 
-            if step == 'edit_plan_field':
+            if step == 'edit_plan_value':
                 try:
                     plan = user_data[uid]['plan']
                     cat = user_data[uid]['cat']
@@ -1011,7 +1011,7 @@ def handle_msg(update, context):
                         user_data[uid] = {}
                         
                 except Exception as e:
-                    logger.error(f"Error in edit_plan_field: {e}")
+                    logger.error(f"Error in edit_plan_value: {e}")
                     update.message.reply_text(f"❌ خطا: {e}")
                 return
 
