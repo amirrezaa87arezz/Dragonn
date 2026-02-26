@@ -639,6 +639,72 @@ def handle_msg(update, context):
                     update.message.reply_text(f"❌ خطا: {e}")
                 return
 
+            if text == '🔁 ترتیب دسته‌ها':
+                categories = list(db["categories"].keys())
+                menu_text = "🔁 ترتیب فعلی دسته‌ها:\n"
+                for i, cat in enumerate(categories, 1):
+                    menu_text += f"{i}. {cat}\n"
+                
+                menu_text += "\nبرای تغییر ترتیب، شماره دسته‌ها رو با ویرگول جدا کنید.\n"
+                menu_text += f"مثال: {','.join(str(x) for x in range(1, len(categories)+1))}"
+                
+                user_data[uid] = {'step': 'reorder_categories'}
+                logger.info(f"🔄 کاربر {uid} وارد مرحله ترتیب دسته‌ها شد")
+                update.message.reply_text(menu_text, reply_markup=back_btn())
+                return
+
+            if step == 'reorder_categories':
+                try:
+                    logger.info(f"🔄 کاربر {uid} در مرحله ترتیب دسته‌ها - متن دریافتی: {text}")
+                    
+                    categories = list(db["categories"].keys())
+                    cleaned_text = text.replace('.', ',').replace('،', ',').replace(' ', '')
+                    logger.info(f"🔄 متن پاکسازی شده: {cleaned_text}")
+                    
+                    parts = []
+                    for x in cleaned_text.split(','):
+                        x = x.strip()
+                        if x.isdigit():
+                            parts.append(x)
+                    
+                    logger.info(f"🔄 اعداد استخراج شده: {parts}")
+                    
+                    if len(parts) != len(categories):
+                        update.message.reply_text(
+                            f"❌ تعداد اعداد با تعداد دسته‌ها هماهنگ نیست!\n"
+                            f"تعداد دسته‌ها: {len(categories)}\n"
+                            f"تعداد اعداد: {len(parts)}"
+                        )
+                        return
+                    
+                    new_order = [int(x) for x in parts]
+                    
+                    if sorted(new_order) != list(range(1, len(categories) + 1)):
+                        update.message.reply_text(f"❌ اعداد باید از ۱ تا {len(categories)} باشند!")
+                        return
+                    
+                    old_categories = categories.copy()
+                    new_categories = {}
+                    for index in new_order:
+                        cat_name = old_categories[index - 1]
+                        new_categories[cat_name] = db["categories"][cat_name]
+                    
+                    db["categories"] = new_categories
+                    save_db(db)
+                    
+                    new_order_text = "✅ ترتیب جدید دسته‌ها:\n"
+                    for i, cat in enumerate(db["categories"].keys(), 1):
+                        new_order_text += f"{i}. {cat}\n"
+                    
+                    logger.info(f"✅ ترتیب جدید دسته‌ها با موفقیت اعمال شد")
+                    update.message.reply_text(new_order_text, reply_markup=get_admin_menu())
+                    user_data[uid] = {}
+                    
+                except Exception as e:
+                    logger.error(f"❌ خطا در ترتیب دسته‌ها: {e}")
+                    update.message.reply_text(f"❌ خطا: لطفاً اعداد را با ویرگول جدا کنید. مثال: 1,2,3,4")
+                return
+
             if text == '⏱️ مدیریت بازه‌های زمانی':
                 time_periods = db.get("time_periods", [30, 60, 90])
                 keyboard = [['➕ بازه جدید', '➖ حذف بازه'], ['✏️ ویرایش بازه'], ['🔙 برگشت']]
@@ -1333,7 +1399,6 @@ def handle_msg(update, context):
                 users_text = "👥 نامحدود کاربر"
             days_text = "نامحدود" if p['days'] == "نامحدود" else f"{p['days']} روز"
             
-            # پیش‌فاکتور با تمام جزئیات
             msg = (
                 f"💳 **پیش‌فاکتور خرید**\n"
                 f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -1346,7 +1411,7 @@ def handle_msg(update, context):
                 f"👤 **نام اکانت:** {text}\n"
                 f"━━━━━━━━━━━━━━━━━━━━\n"
                 f"💳 **اطلاعات پرداخت:**\n"
-                f"شماره کارت: <code>{db['card']['number']}</code>\n"
+                f"شماره کارت: `{db['card']['number']}`\n"
                 f"به نام: {db['card']['name']}\n"
                 f"━━━━━━━━━━━━━━━━━━━━\n"
                 f"✅ پس از واریز، عکس فیش را ارسال کنید"
@@ -1411,7 +1476,7 @@ def handle_cb(update, context):
             
             keyboard = []
             for days in time_periods:
-                keyboard.append([InlineKeyboardButton(f"📅 {days} روزه", callback_data=f"subcat_{cat}_{days}")])
+                keyboard.append([InlineKeyboardButton(f"💰 {days} روزه", callback_data=f"subcat_{cat}_{days}")])
             
             keyboard.append([InlineKeyboardButton(db["texts"]["back_button"], callback_data="back_to_categories")])
             query.message.edit_text(f"📦 {cat}\nلطفاً مدت زمان مورد نظر را انتخاب کنید:", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -1432,7 +1497,6 @@ def handle_cb(update, context):
             keyboard = []
             for p in plans:
                 price_toman = p['price'] * 1000
-                # فقط اسم و قیمت در دکمه‌ها
                 btn_text = f"{p['name']} - {price_toman:,} تومان"
                 keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"buy_{p['id']}")])
             
