@@ -992,36 +992,39 @@ def handle_msg(update, context):
 
             if step == 'new_cat' and text in db["categories"]:
                 user_data[uid]['cat'] = text
-                user_data[uid]['step'] = 'new_name'
-                update.message.reply_text("📝 نام پلن را وارد کنید:", reply_markup=back_btn())
+                time_periods = db.get("time_periods", [30, 60, 90])
+                kb = [[str(p) + " روزه"] for p in time_periods] + [['🔙 برگشت']]
+                user_data[uid]['step'] = 'new_time'
+                update.message.reply_text("⏱️ بازه زمانی را انتخاب کنید:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+                return
+
+            if step == 'new_time':
+                try:
+                    days = int(text.replace(" روزه", ""))
+                    user_data[uid]['days'] = days
+                    user_data[uid]['step'] = 'new_name'
+                    update.message.reply_text("📝 نام پلن را وارد کنید:", reply_markup=back_btn())
+                except:
+                    update.message.reply_text("❌ لطفاً یک گزینه معتبر انتخاب کنید!")
                 return
 
             if step == 'new_name':
                 user_data[uid]['name'] = text
                 user_data[uid]['step'] = 'new_vol'
-                update.message.reply_text("📦 حجم پلن را وارد کنید (مثال: 50GB):")
+                update.message.reply_text("📦 حجم پلن را وارد کنید (مثال: 50GB):", reply_markup=back_btn())
                 return
 
             if step == 'new_vol':
                 user_data[uid]['vol'] = text
                 user_data[uid]['step'] = 'new_users'
-                update.message.reply_text("👥 تعداد کاربران را وارد کنید (عدد یا 'نامحدود'):")
+                update.message.reply_text("👥 تعداد کاربران را وارد کنید (عدد یا 'نامحدود'):", reply_markup=back_btn())
                 return
 
             if step == 'new_users':
                 if text.isdigit() or text == "نامحدود":
                     user_data[uid]['users'] = text if text == "نامحدود" else int(text)
-                    user_data[uid]['step'] = 'new_days'
-                    update.message.reply_text("⏳ مدت اعتبار را به روز وارد کنید (عدد یا 'نامحدود'):")
-                else:
-                    update.message.reply_text("❌ لطفاً یک عدد معتبر یا کلمه 'نامحدود' وارد کنید!")
-                return
-
-            if step == 'new_days':
-                if text.isdigit() or text == "نامحدود":
-                    user_data[uid]['days'] = text if text == "نامحدود" else int(text)
                     user_data[uid]['step'] = 'new_price'
-                    update.message.reply_text("💰 قیمت را به هزار تومان وارد کنید (عدد):")
+                    update.message.reply_text("💰 قیمت را به هزار تومان وارد کنید (عدد):", reply_markup=back_btn())
                 else:
                     update.message.reply_text("❌ لطفاً یک عدد معتبر یا کلمه 'نامحدود' وارد کنید!")
                 return
@@ -1049,15 +1052,14 @@ def handle_msg(update, context):
                     save_db(db)
                     
                     users_display = new_plan['users'] if new_plan['users'] != "نامحدود" else "نامحدود"
-                    days_display = new_plan['days'] if new_plan['days'] != "نامحدود" else "نامحدود"
                     
                     plan_info = (
                         f"✅ پلن جدید با موفقیت اضافه شد!\n\n"
                         f"📌 دسته: {category}\n"
+                        f"⏱️ بازه زمانی: {new_plan['days']} روزه\n"
                         f"📝 نام: {new_plan['name']}\n"
                         f"📦 حجم: {new_plan['volume']}\n"
                         f"👥 کاربران: {users_display}\n"
-                        f"⏳ مدت: {days_display} روز\n"
                         f"💰 قیمت: {new_plan['price'] * 1000:,} تومان"
                     )
                     
