@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import requests  # اضافه شد
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from threading import Thread
 from telegram import ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
@@ -39,6 +40,13 @@ def run_web():
 # --- توکن و آیدی ادمین ---
 TOKEN = '8121233049:AAET4QcaRLiZzIBs5xglJfkSDKPTzADIgjY'
 ADMIN_ID = 5993860770
+
+# --- غیرفعال کردن ربات قبلی ---
+try:
+    requests.post(f'https://api.telegram.org/bot{TOKEN}/deleteWebhook', params={'drop_pending_updates': True})
+    logger.info("✅ Webhook deleted successfully")
+except:
+    pass
 
 # --- مسیر دیتابیس ---
 DB_FILE = 'data.json'
@@ -118,6 +126,7 @@ def load_db():
                 data = json.load(f)
                 logger.info("✅ Database loaded successfully")
                 
+                # اضافه کردن فیلدهای جدید به دیتابیس قدیمی
                 if "users" not in data:
                     data["users"] = {}
                 if "brand" not in data:
@@ -166,16 +175,6 @@ def load_db():
         "texts": DEFAULT_TEXTS.copy(),
         "time_periods": [30, 60, 90]
     }
-
-def save_db(data):
-    try:
-        with open(DB_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-        logger.info("💾 Database saved successfully")
-        return True
-    except Exception as e:
-        logger.error(f"❌ Error saving database: {e}")
-        return False
 
 db = load_db()
 user_data = {}
