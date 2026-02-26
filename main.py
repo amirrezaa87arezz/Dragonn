@@ -1089,17 +1089,8 @@ def handle_msg(update, context):
             if step == 'new_users':
                 if text.isdigit() or text == "نامحدود":
                     user_data[uid]['users'] = text if text == "نامحدود" else int(text)
-                    user_data[uid]['step'] = 'new_days'
-                    update.message.reply_text("⏳ مدت اعتبار را به روز وارد کنید (عدد یا 'نامحدود'):")
-                else:
-                    update.message.reply_text("❌ لطفاً یک عدد معتبر یا کلمه 'نامحدود' وارد کنید!")
-                return
-
-            if step == 'new_days':
-                if text.isdigit() or text == "نامحدود":
-                    user_data[uid]['days'] = text if text == "نامحدود" else int(text)
                     user_data[uid]['step'] = 'new_price'
-                    update.message.reply_text("💰 قیمت را به هزار تومان وارد کنید (عدد):")
+                    update.message.reply_text("💰 قیمت را به هزار تومان وارد کنید (عدد):", reply_markup=back_btn())
                 else:
                     update.message.reply_text("❌ لطفاً یک عدد معتبر یا کلمه 'نامحدود' وارد کنید!")
                 return
@@ -1127,15 +1118,14 @@ def handle_msg(update, context):
                     save_db(db)
                     
                     users_display = new_plan['users'] if new_plan['users'] != "نامحدود" else "نامحدود"
-                    days_display = new_plan['days'] if new_plan['days'] != "نامحدود" else "نامحدود"
                     
                     plan_info = (
                         f"✅ پلن جدید با موفقیت اضافه شد!\n\n"
                         f"📌 دسته: {category}\n"
+                        f"⏱️ بازه زمانی: {new_plan['days']} روزه\n"
                         f"📝 نام: {new_plan['name']}\n"
                         f"📦 حجم: {new_plan['volume']}\n"
                         f"👥 کاربران: {users_display}\n"
-                        f"⏳ مدت: {days_display} روز\n"
                         f"💰 قیمت: {new_plan['price'] * 1000:,} تومان"
                     )
                     
@@ -1146,186 +1136,132 @@ def handle_msg(update, context):
                     update.message.reply_text(f"❌ خطا: {e}")
                 return
 
-            if text == '➖ حذف پلن':
-                # این بخش در handle_cb هست
-                pass
-
-            if text == '✏️ ویرایش پلن':
-                # این بخش در handle_cb هست
-                pass
-
+            # ========== بخش ویرایش پلن (کاملاً بازنویسی شده) ==========
             if step == 'edit_plan_select_field':
-                logger.info(f"✏️ کاربر {uid} در مرحله انتخاب فیلد ویرایش - متن: {text}")
+                logger.info(f"✏️ کاربر {uid} در مرحله انتخاب فیلد ویرایش")
                 try:
-                    plan = user_data[uid]['plan']
+                    if 'cat' not in user_data[uid] or 'plan_index' not in user_data[uid]:
+                        update.message.reply_text("❌ خطا در ویرایش. دوباره تلاش کنید.", reply_markup=get_admin_menu())
+                        user_data[uid] = {}
+                        return
+                    
                     cat = user_data[uid]['cat']
+                    plan_index = user_data[uid]['plan_index']
+                    
+                    if cat not in db["categories"] or plan_index >= len(db["categories"][cat]):
+                        update.message.reply_text("❌ پلن مورد نظر یافت نشد.", reply_markup=get_admin_menu())
+                        user_data[uid] = {}
+                        return
+                    
+                    plan = db["categories"][cat][plan_index]
+                    user_data[uid]['plan'] = plan
                     
                     if text == 'نام':
-                        logger.info(f"✏️ کاربر گزینه نام را انتخاب کرد")
                         user_data[uid]['edit_field'] = 'name'
                         user_data[uid]['step'] = 'edit_plan_enter_value'
                         update.message.reply_text(f"📝 نام جدید برای پلن '{plan['name']}' را وارد کنید:", reply_markup=back_btn())
-                        return
                     
                     elif text == 'حجم':
-                        logger.info(f"✏️ کاربر گزینه حجم را انتخاب کرد")
                         user_data[uid]['edit_field'] = 'volume'
                         user_data[uid]['step'] = 'edit_plan_enter_value'
                         update.message.reply_text(f"📦 حجم جدید برای پلن '{plan['name']}' (مثال: 50GB):", reply_markup=back_btn())
-                        return
                     
                     elif text == 'کاربران':
-                        logger.info(f"✏️ کاربر گزینه کاربران را انتخاب کرد")
                         user_data[uid]['edit_field'] = 'users'
                         user_data[uid]['step'] = 'edit_plan_enter_value'
                         update.message.reply_text(f"👥 تعداد کاربران جدید (عدد یا 'نامحدود'):", reply_markup=back_btn())
-                        return
                     
                     elif text == 'مدت':
-                        logger.info(f"✏️ کاربر گزینه مدت را انتخاب کرد")
                         user_data[uid]['edit_field'] = 'days'
                         user_data[uid]['step'] = 'edit_plan_enter_value'
                         update.message.reply_text(f"⏳ مدت اعتبار جدید (روز یا 'نامحدود'):", reply_markup=back_btn())
-                        return
                     
                     elif text == 'قیمت':
-                        logger.info(f"✏️ کاربر گزینه قیمت را انتخاب کرد")
                         user_data[uid]['edit_field'] = 'price'
                         user_data[uid]['step'] = 'edit_plan_enter_value'
                         update.message.reply_text(f"💰 قیمت جدید (هزار تومان):", reply_markup=back_btn())
-                        return
                     
                     elif text == '🔙 برگشت':
-                        logger.info(f"✏️ کاربر انصراف داد")
                         user_data[uid] = {}
                         update.message.reply_text("🛠 پنل مدیریت:", reply_markup=get_admin_menu())
-                        return
                     
                     else:
-                        update.message.reply_text("❌ گزینه نامعتبر!", reply_markup=back_btn())
-                        return
+                        update.message.reply_text("❌ گزینه نامعتبر!")
                         
                 except Exception as e:
                     logger.error(f"❌ Error in edit_plan_select_field: {e}")
                     update.message.reply_text(f"❌ خطا: {e}")
-                    return
+                    user_data[uid] = {}
+                return
 
             if step == 'edit_plan_enter_value':
-                logger.info(f"✏️ کاربر {uid} در مرحله دریافت مقدار جدید - متن: {text}")
+                logger.info(f"✏️ کاربر {uid} در مرحله دریافت مقدار جدید")
                 try:
-                    plan = user_data[uid]['plan']
+                    if 'cat' not in user_data[uid] or 'plan_index' not in user_data[uid] or 'edit_field' not in user_data[uid]:
+                        update.message.reply_text("❌ خطا در ویرایش. دوباره تلاش کنید.", reply_markup=get_admin_menu())
+                        user_data[uid] = {}
+                        return
+                    
                     cat = user_data[uid]['cat']
+                    plan_index = user_data[uid]['plan_index']
                     field = user_data[uid]['edit_field']
                     
-                    found = False
-                    for i, p in enumerate(db["categories"][cat]):
-                        if p["id"] == plan["id"]:
-                            found = True
-                            logger.info(f"✏️ پلن پیدا شد: {p['name']}")
-                            
-                            if field == 'users':
-                                if text.isdigit() or text == "نامحدود":
-                                    db["categories"][cat][i][field] = text if text == "نامحدود" else int(text)
-                                    save_db(db)
-                                    
-                                    users_display = db["categories"][cat][i]['users'] if db["categories"][cat][i]['users'] != "نامحدود" else "نامحدود"
-                                    days_display = db["categories"][cat][i]['days'] if db["categories"][cat][i]['days'] != "نامحدود" else "نامحدود"
-                                    
-                                    result_msg = (
-                                        f"✅ پلن با موفقیت ویرایش شد!\n\n"
-                                        f"📌 دسته: {cat}\n"
-                                        f"📝 نام: {db['categories'][cat][i]['name']}\n"
-                                        f"📦 حجم: {db['categories'][cat][i]['volume']}\n"
-                                        f"👥 کاربران: {users_display}\n"
-                                        f"⏳ مدت: {days_display} روز\n"
-                                        f"💰 قیمت: {db['categories'][cat][i]['price'] * 1000:,} تومان"
-                                    )
-                                    
-                                    update.message.reply_text(result_msg, reply_markup=get_admin_menu())
-                                    user_data[uid] = {}
-                                    logger.info(f"✅ ویرایش کاربران با موفقیت انجام شد")
-                                else:
-                                    update.message.reply_text("❌ لطفاً عدد یا 'نامحدود' وارد کنید!")
-                            
-                            elif field == 'days':
-                                if text.isdigit() or text == "نامحدود":
-                                    db["categories"][cat][i][field] = text if text == "نامحدود" else int(text)
-                                    save_db(db)
-                                    
-                                    users_display = db["categories"][cat][i]['users'] if db["categories"][cat][i]['users'] != "نامحدود" else "نامحدود"
-                                    days_display = db["categories"][cat][i]['days'] if db["categories"][cat][i]['days'] != "نامحدود" else "نامحدود"
-                                    
-                                    result_msg = (
-                                        f"✅ پلن با موفقیت ویرایش شد!\n\n"
-                                        f"📌 دسته: {cat}\n"
-                                        f"📝 نام: {db['categories'][cat][i]['name']}\n"
-                                        f"📦 حجم: {db['categories'][cat][i]['volume']}\n"
-                                        f"👥 کاربران: {users_display}\n"
-                                        f"⏳ مدت: {days_display} روز\n"
-                                        f"💰 قیمت: {db['categories'][cat][i]['price'] * 1000:,} تومان"
-                                    )
-                                    
-                                    update.message.reply_text(result_msg, reply_markup=get_admin_menu())
-                                    user_data[uid] = {}
-                                    logger.info(f"✅ ویرایش مدت با موفقیت انجام شد")
-                                else:
-                                    update.message.reply_text("❌ لطفاً عدد یا 'نامحدود' وارد کنید!")
-                            
-                            elif field == 'price':
-                                try:
-                                    val = int(text)
-                                    db["categories"][cat][i][field] = val
-                                    save_db(db)
-                                    
-                                    users_display = db["categories"][cat][i]['users'] if db["categories"][cat][i]['users'] != "نامحدود" else "نامحدود"
-                                    days_display = db["categories"][cat][i]['days'] if db["categories"][cat][i]['days'] != "نامحدود" else "نامحدود"
-                                    
-                                    result_msg = (
-                                        f"✅ پلن با موفقیت ویرایش شد!\n\n"
-                                        f"📌 دسته: {cat}\n"
-                                        f"📝 نام: {db['categories'][cat][i]['name']}\n"
-                                        f"📦 حجم: {db['categories'][cat][i]['volume']}\n"
-                                        f"👥 کاربران: {users_display}\n"
-                                        f"⏳ مدت: {days_display} روز\n"
-                                        f"💰 قیمت: {db['categories'][cat][i]['price'] * 1000:,} تومان"
-                                    )
-                                    
-                                    update.message.reply_text(result_msg, reply_markup=get_admin_menu())
-                                    user_data[uid] = {}
-                                    logger.info(f"✅ ویرایش قیمت با موفقیت انجام شد")
-                                except:
-                                    update.message.reply_text("❌ لطفاً عدد وارد کنید!")
-                            
-                            else:
-                                db["categories"][cat][i][field] = text
-                                save_db(db)
-                                
-                                users_display = db["categories"][cat][i]['users'] if db["categories"][cat][i]['users'] != "نامحدود" else "نامحدود"
-                                days_display = db["categories"][cat][i]['days'] if db["categories"][cat][i]['days'] != "نامحدود" else "نامحدود"
-                                
-                                result_msg = (
-                                    f"✅ پلن با موفقیت ویرایش شد!\n\n"
-                                    f"📌 دسته: {cat}\n"
-                                    f"📝 نام: {db['categories'][cat][i]['name']}\n"
-                                    f"📦 حجم: {db['categories'][cat][i]['volume']}\n"
-                                    f"👥 کاربران: {users_display}\n"
-                                    f"⏳ مدت: {days_display} روز\n"
-                                    f"💰 قیمت: {db['categories'][cat][i]['price'] * 1000:,} تومان"
-                                )
-                                
-                                update.message.reply_text(result_msg, reply_markup=get_admin_menu())
-                                user_data[uid] = {}
-                                logger.info(f"✅ ویرایش {field} با موفقیت انجام شد")
-                            break
-                    
-                    if not found:
-                        logger.error(f"❌ پلن با id {plan['id']} در دسته {cat} پیدا نشد")
-                        update.message.reply_text("❌ خطا در ویرایش پلن!")
+                    if cat not in db["categories"] or plan_index >= len(db["categories"][cat]):
+                        update.message.reply_text("❌ پلن مورد نظر یافت نشد.", reply_markup=get_admin_menu())
                         user_data[uid] = {}
-                        
+                        return
+                    
+                    # اعتبارسنجی بر اساس فیلد
+                    if field == 'users':
+                        if text.isdigit() or text == "نامحدود":
+                            db["categories"][cat][plan_index][field] = text if text == "نامحدود" else int(text)
+                        else:
+                            update.message.reply_text("❌ لطفاً عدد یا 'نامحدود' وارد کنید!")
+                            return
+                    
+                    elif field == 'days':
+                        if text.isdigit() or text == "نامحدود":
+                            db["categories"][cat][plan_index][field] = text if text == "نامحدود" else int(text)
+                        else:
+                            update.message.reply_text("❌ لطفاً عدد یا 'نامحدود' وارد کنید!")
+                            return
+                    
+                    elif field == 'price':
+                        try:
+                            db["categories"][cat][plan_index][field] = int(text)
+                        except:
+                            update.message.reply_text("❌ لطفاً عدد وارد کنید!")
+                            return
+                    
+                    else:  # name, volume
+                        db["categories"][cat][plan_index][field] = text
+                    
+                    # ذخیره تغییرات
+                    save_db(db)
+                    
+                    # نمایش نتیجه
+                    p = db["categories"][cat][plan_index]
+                    users_display = p['users'] if p['users'] != "نامحدود" else "نامحدود"
+                    days_display = p['days'] if p['days'] != "نامحدود" else "نامحدود"
+                    
+                    result_msg = (
+                        f"✅ پلن با موفقیت ویرایش شد!\n\n"
+                        f"📌 دسته: {cat}\n"
+                        f"📝 نام: {p['name']}\n"
+                        f"📦 حجم: {p['volume']}\n"
+                        f"👥 کاربران: {users_display}\n"
+                        f"⏳ مدت: {days_display} روز\n"
+                        f"💰 قیمت: {p['price'] * 1000:,} تومان"
+                    )
+                    
+                    update.message.reply_text(result_msg, reply_markup=get_admin_menu())
+                    user_data[uid] = {}
+                    logger.info(f"✅ ویرایش {field} با موفقیت انجام شد")
+                    
                 except Exception as e:
                     logger.error(f"❌ Error in edit_plan_enter_value: {e}")
                     update.message.reply_text(f"❌ خطا: {e}")
+                    user_data[uid] = {}
                 return
 
             if step == 'card_num':
@@ -1493,6 +1429,7 @@ def handle_cb(update, context):
             query.message.edit_text(f"📦 {cat}\nلطفاً مدت زمان مورد نظر را انتخاب کنید:", reply_markup=InlineKeyboardMarkup(keyboard))
             return
 
+        # ========== بخش اصلاح شده برای نمایش فقط اسم و قیمت ==========
         if query.data.startswith("subcat_"):
             parts = query.data.split("_")
             cat = parts[1]
@@ -1508,8 +1445,10 @@ def handle_cb(update, context):
             keyboard = []
             for p in plans:
                 price_toman = p['price'] * 1000
-                # فقط اسم و قیمت در دکمه‌ها (بدون حجم)
-                btn_text = f"{p['name']} - {price_toman:,} تومان"
+                # فقط اسم و قیمت (بدون حجم)
+                plan_name = p['name']
+                # اگه اسم شامل GB هست، همونو نگه دار
+                btn_text = f"{plan_name} - {price_toman:,} تومان"
                 keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"buy_{p['id']}")])
             
             keyboard.append([InlineKeyboardButton(db["texts"]["back_button"], callback_data=f"cat_{cat}")])
@@ -1719,29 +1658,36 @@ def handle_cb(update, context):
                     query.message.edit_text(f"❌ خطا: {e}")
             return
 
+        # ========== بخش ویرایش پلن (کاملاً بازنویسی شده) ==========
         if query.data.startswith("edit_plan_"):
             if str(uid) == str(ADMIN_ID):
                 try:
                     plan_id = int(query.data.split("_")[2])
                     
                     for cat, plans in db["categories"].items():
-                        for p in plans:
+                        for i, p in enumerate(plans):
                             if p["id"] == plan_id:
-                                logger.info(f"✏️ کاربر {uid} شروع ویرایش پلن {p['name']}")
-                                user_data[uid] = {'step': 'edit_plan_select_field', 'plan': p, 'cat': cat}
+                                # ذخیره اطلاعات در user_data
+                                user_data[uid] = {
+                                    'step': 'edit_plan_select_field',
+                                    'cat': cat,
+                                    'plan_index': i,
+                                    'plan_id': plan_id
+                                }
                                 
                                 keyboard = [
                                     ['نام', 'حجم', 'کاربران'],
                                     ['مدت', 'قیمت'],
                                     ['🔙 برگشت']
                                 ]
-                                query.message.edit_text(
-                                    f"✏️ ویرایش پلن {p['name']}\nچه چیزی را ویرایش کنیم؟",
-                                    reply_markup=None
-                                )
+                                
+                                # پاک کردن پیام قبلی
+                                query.message.delete()
+                                
+                                # ارسال پیام جدید
                                 context.bot.send_message(
                                     uid,
-                                    "گزینه مورد نظر را انتخاب کنید:",
+                                    f"✏️ ویرایش پلن {p['name']}\nچه چیزی را ویرایش کنیم؟",
                                     reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
                                 )
                                 return
