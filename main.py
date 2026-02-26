@@ -1136,9 +1136,15 @@ def handle_msg(update, context):
                     update.message.reply_text(f"❌ خطا: {e}")
                 return
 
+            # ========== بخش ویرایش پلن (کاملاً اصلاح شده) ==========
             if step == 'edit_plan_select_field':
                 logger.info(f"✏️ کاربر {uid} در مرحله انتخاب فیلد ویرایش - متن: {text}")
                 try:
+                    if 'plan' not in user_data[uid] or 'cat' not in user_data[uid]:
+                        user_data[uid] = {}
+                        update.message.reply_text("❌ خطا در ویرایش. دوباره تلاش کنید.", reply_markup=get_admin_menu())
+                        return
+                        
                     plan = user_data[uid]['plan']
                     cat = user_data[uid]['cat']
                     
@@ -1195,6 +1201,11 @@ def handle_msg(update, context):
             if step == 'edit_plan_enter_value':
                 logger.info(f"✏️ کاربر {uid} در مرحله دریافت مقدار جدید - متن: {text}")
                 try:
+                    if 'plan' not in user_data[uid] or 'cat' not in user_data[uid] or 'edit_field' not in user_data[uid]:
+                        user_data[uid] = {}
+                        update.message.reply_text("❌ خطا در ویرایش. دوباره تلاش کنید.", reply_markup=get_admin_menu())
+                        return
+                        
                     plan = user_data[uid]['plan']
                     cat = user_data[uid]['cat']
                     field = user_data[uid]['edit_field']
@@ -1399,6 +1410,7 @@ def handle_msg(update, context):
                 users_text = "👥 نامحدود کاربر"
             days_text = "نامحدود" if p['days'] == "نامحدود" else f"{p['days']} روز"
             
+            # پیش‌فاکتور با تمام جزئیات
             msg = (
                 f"💳 **پیش‌فاکتور خرید**\n"
                 f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -1497,6 +1509,7 @@ def handle_cb(update, context):
             keyboard = []
             for p in plans:
                 price_toman = p['price'] * 1000
+                # فقط اسم و قیمت در دکمه‌ها (بدون حجم)
                 btn_text = f"{p['name']} - {price_toman:,} تومان"
                 keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"buy_{p['id']}")])
             
@@ -1707,35 +1720,43 @@ def handle_cb(update, context):
                     query.message.edit_text(f"❌ خطا: {e}")
             return
 
+        # ========== بخش ویرایش پلن (کاملاً اصلاح شده) ==========
         if query.data.startswith("edit_plan_"):
             if str(uid) == str(ADMIN_ID):
                 try:
                     plan_id = int(query.data.split("_")[2])
                     
                     for cat, plans in db["categories"].items():
-                        for p in plans:
+                        for i, p in enumerate(plans):
                             if p["id"] == plan_id:
                                 logger.info(f"✏️ کاربر {uid} شروع ویرایش پلن {p['name']}")
-                                user_data[uid] = {'step': 'edit_plan_select_field', 'plan': p, 'cat': cat}
+                                user_data[uid] = {
+                                    'step': 'edit_plan_select_field', 
+                                    'plan': p.copy(), 
+                                    'cat': cat,
+                                    'plan_index': i
+                                }
                                 
                                 keyboard = [
                                     ['نام', 'حجم', 'کاربران'],
                                     ['مدت', 'قیمت'],
                                     ['🔙 برگشت']
                                 ]
-                                query.message.edit_text(
-                                    f"✏️ ویرایش پلن {p['name']}\nچه چیزی را ویرایش کنیم؟",
-                                    reply_markup=None
-                                )
+                                
+                                # پاک کردن پیام قبلی
+                                query.message.delete()
+                                
+                                # ارسال پیام جدید با کیبورد شیشه‌ای
                                 context.bot.send_message(
                                     uid,
-                                    "گزینه مورد نظر را انتخاب کنید:",
+                                    f"✏️ ویرایش پلن {p['name']}\nچه چیزی را ویرایش کنیم؟",
                                     reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
                                 )
                                 return
                     
                     query.message.edit_text("❌ پلن یافت نشد.")
                 except Exception as e:
+                    logger.error(f"❌ Error in edit_plan: {e}")
                     query.message.edit_text(f"❌ خطا: {e}")
             return
 
