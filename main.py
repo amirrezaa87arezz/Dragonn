@@ -199,7 +199,7 @@ def back_btn():
 def get_admin_menu():
     kb = [
         ['📋 مدیریت منو', '📦 مدیریت دسته‌ها'],
-        ['➕ پلن جدید', '➖ حذف پلن'],  # ویرایش پلن حذف شد
+        ['➕ پلن جدید', '➖ حذف پلن'],
         ['⏱️ مدیریت بازه‌های زمانی'],
         ['💳 ویرایش کارت', '📝 ویرایش متن‌ها'],
         ['👤 ویرایش پشتیبان', '📢 ویرایش کانال آموزش'],
@@ -1049,6 +1049,24 @@ def handle_msg(update, context):
                 update.message.reply_text("📨 پیام همگانی را بفرستید:", reply_markup=back_btn())
                 return
 
+            # ========== بخش حذف پلن (اصلاح شده) ==========
+            if text == '➖ حذف پلن':
+                # ساخت لیست همه پلن‌ها
+                keyboard = []
+                for cat, plans in db["categories"].items():
+                    for p in plans:
+                        price_toman = p['price'] * 1000
+                        btn_text = f"❌ {cat} - {p['name']} - {price_toman:,} تومان"
+                        keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"delete_plan_{p['id']}")])
+                
+                keyboard.append([InlineKeyboardButton("🔙 برگشت", callback_data="back_to_admin")])
+                
+                update.message.reply_text(
+                    "🗑️ پلن مورد نظر برای حذف را انتخاب کنید:",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                return
+
             if text == '➕ پلن جدید':
                 categories = list(db["categories"].keys())
                 kb = [[c] for c in categories] + [['🔙 برگشت']]
@@ -1154,8 +1172,6 @@ def handle_msg(update, context):
                 except Exception as e:
                     update.message.reply_text(f"❌ خطا: {e}")
                 return
-
-            # بخش‌های مربوط به ویرایش پلن به طور کامل حذف شدند
 
             if step == 'card_num':
                 if text.isdigit() and len(text) == 16:
@@ -1547,47 +1563,54 @@ def handle_cb(update, context):
                     query.message.edit_text(f"❌ خطا: {e}")
             return
 
-        # ========== بخش اصلاح شده برای حذف پلن ==========
-        if query.data.startswith("del_"):
+        # ========== بخش حذف پلن (کاملاً جداسازی شده) ==========
+        if query.data.startswith("delete_plan_"):
             if str(uid) == str(ADMIN_ID):
                 try:
                     # استخراج شناسه پلن
-                    parts = query.data.split("_")
-                    if len(parts) >= 2:
-                        plan_id_str = parts[1]
-                        if plan_id_str.isdigit():
-                            plan_id = int(plan_id_str)
-                            deleted = False
-                            delete_cat = ""
-                            delete_name = ""
-                            
-                            # جستجو در همه دسته‌ها
-                            for cat, plans in db["categories"].items():
-                                for i, p in enumerate(plans):
-                                    if p["id"] == plan_id:
-                                        delete_name = p['name']
-                                        delete_cat = cat
-                                        del plans[i]
-                                        deleted = True
-                                        break
-                                if deleted:
-                                    break
-                            
-                            if deleted:
-                                save_db(db)
-                                query.message.edit_text(f"✅ پلن '{delete_name}' از دسته '{delete_cat}' با موفقیت حذف شد.")
-                            else:
-                                query.message.edit_text("❌ پلن مورد نظر یافت نشد.")
-                        else:
-                            query.message.edit_text("❌ شناسه پلن نامعتبر است.")
+                    plan_id = int(query.data.split("_")[2])
+                    logger.info(f"🗑️ درخواست حذف پلن با شناسه: {plan_id}")
+                    
+                    deleted = False
+                    delete_cat = ""
+                    delete_name = ""
+                    
+                    # جستجو در همه دسته‌ها
+                    for cat, plans in list(db["categories"].items()):
+                        for i, p in enumerate(plans):
+                            if p["id"] == plan_id:
+                                delete_name = p['name']
+                                delete_cat = cat
+                                # حذف پلن
+                                del plans[i]
+                                deleted = True
+                                logger.info(f"✅ پلن {delete_name} از دسته {delete_cat} حذف شد")
+                                break
+                        if deleted:
+                            break
+                    
+                    if deleted:
+                        # ذخیره تغییرات
+                        save_db(db)
+                        
+                        # ارسال پیام تایید
+                        context.bot.send_message(
+                            uid,
+                            f"✅ پلن '{delete_name}' از دسته '{delete_cat}' با موفقیت حذف شد."
+                        )
+                        
+                        # حذف پیام قبلی (لیست پلن‌ها)
+                        query.message.delete()
+                        
+                        # برگشت به منوی مدیریت
+                        context.bot.send_message(uid, "🛠 پنل مدیریت:", reply_markup=get_admin_menu())
                     else:
-                        query.message.edit_text("❌ فرمت درخواست حذف نامعتبر است.")
+                        context.bot.send_message(uid, "❌ پلن مورد نظر یافت نشد.")
+                        
                 except Exception as e:
                     logger.error(f"❌ Error in delete plan: {e}")
-                    query.message.edit_text(f"❌ خطا در حذف پلن: {e}")
+                    context.bot.send_message(uid, f"❌ خطا در حذف پلن: {e}")
             return
-
-        # بخش ویرایش پلن به طور کامل حذف شد
 
         if query.data.startswith("test_"):
             if str(uid) == str(ADMIN_ID):
