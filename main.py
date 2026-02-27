@@ -199,7 +199,7 @@ def back_btn():
 def get_admin_menu():
     kb = [
         ['📋 مدیریت منو', '📦 مدیریت دسته‌ها'],
-        ['➕ پلن جدید', '➖ حذف پلن', '✏️ ویرایش پلن'],
+        ['➕ پلن جدید', '➖ حذف پلن'],  # ویرایش پلن حذف شد
         ['⏱️ مدیریت بازه‌های زمانی'],
         ['💳 ویرایش کارت', '📝 ویرایش متن‌ها'],
         ['👤 ویرایش پشتیبان', '📢 ویرایش کانال آموزش'],
@@ -1155,133 +1155,7 @@ def handle_msg(update, context):
                     update.message.reply_text(f"❌ خطا: {e}")
                 return
 
-            # ========== بخش ویرایش پلن ==========
-            if step == 'edit_plan_select_field':
-                logger.info(f"✏️ کاربر {uid} در مرحله انتخاب فیلد ویرایش")
-                try:
-                    if 'cat' not in user_data[uid] or 'plan_index' not in user_data[uid]:
-                        update.message.reply_text("❌ خطا در ویرایش. دوباره تلاش کنید.", reply_markup=get_admin_menu())
-                        user_data[uid] = {}
-                        return
-                    
-                    cat = user_data[uid]['cat']
-                    plan_index = user_data[uid]['plan_index']
-                    
-                    if cat not in db["categories"] or plan_index >= len(db["categories"][cat]):
-                        update.message.reply_text("❌ پلن مورد نظر یافت نشد.", reply_markup=get_admin_menu())
-                        user_data[uid] = {}
-                        return
-                    
-                    plan = db["categories"][cat][plan_index]
-                    user_data[uid]['plan'] = plan
-                    
-                    if text == 'نام':
-                        user_data[uid]['edit_field'] = 'name'
-                        user_data[uid]['step'] = 'edit_plan_enter_value'
-                        update.message.reply_text(f"📝 نام جدید برای پلن '{plan['name']}' را وارد کنید:", reply_markup=back_btn())
-                    
-                    elif text == 'حجم':
-                        user_data[uid]['edit_field'] = 'volume'
-                        user_data[uid]['step'] = 'edit_plan_enter_value'
-                        update.message.reply_text(f"📦 حجم جدید برای پلن '{plan['name']}' (مثال: 50GB):", reply_markup=back_btn())
-                    
-                    elif text == 'کاربران':
-                        user_data[uid]['edit_field'] = 'users'
-                        user_data[uid]['step'] = 'edit_plan_enter_value'
-                        update.message.reply_text(f"👥 تعداد کاربران جدید (عدد یا 'نامحدود'):", reply_markup=back_btn())
-                    
-                    elif text == 'مدت':
-                        user_data[uid]['edit_field'] = 'days'
-                        user_data[uid]['step'] = 'edit_plan_enter_value'
-                        update.message.reply_text(f"⏳ مدت اعتبار جدید (روز یا 'نامحدود'):", reply_markup=back_btn())
-                    
-                    elif text == 'قیمت':
-                        user_data[uid]['edit_field'] = 'price'
-                        user_data[uid]['step'] = 'edit_plan_enter_value'
-                        update.message.reply_text(f"💰 قیمت جدید (هزار تومان):", reply_markup=back_btn())
-                    
-                    elif text == '🔙 برگشت':
-                        user_data[uid] = {}
-                        update.message.reply_text("🛠 پنل مدیریت:", reply_markup=get_admin_menu())
-                    
-                    else:
-                        update.message.reply_text("❌ گزینه نامعتبر!")
-                        
-                except Exception as e:
-                    logger.error(f"❌ Error in edit_plan_select_field: {e}")
-                    update.message.reply_text(f"❌ خطا: {e}")
-                    user_data[uid] = {}
-                return
-
-            if step == 'edit_plan_enter_value':
-                logger.info(f"✏️ کاربر {uid} در مرحله دریافت مقدار جدید")
-                try:
-                    if 'cat' not in user_data[uid] or 'plan_index' not in user_data[uid] or 'edit_field' not in user_data[uid]:
-                        update.message.reply_text("❌ خطا در ویرایش. دوباره تلاش کنید.", reply_markup=get_admin_menu())
-                        user_data[uid] = {}
-                        return
-                    
-                    cat = user_data[uid]['cat']
-                    plan_index = user_data[uid]['plan_index']
-                    field = user_data[uid]['edit_field']
-                    
-                    if cat not in db["categories"] or plan_index >= len(db["categories"][cat]):
-                        update.message.reply_text("❌ پلن مورد نظر یافت نشد.", reply_markup=get_admin_menu())
-                        user_data[uid] = {}
-                        return
-                    
-                    # اعتبارسنجی بر اساس فیلد
-                    if field == 'users':
-                        if text.isdigit() or text == "نامحدود":
-                            db["categories"][cat][plan_index][field] = text if text == "نامحدود" else int(text)
-                        else:
-                            update.message.reply_text("❌ لطفاً عدد یا 'نامحدود' وارد کنید!")
-                            return
-                    
-                    elif field == 'days':
-                        if text.isdigit() or text == "نامحدود":
-                            db["categories"][cat][plan_index][field] = text if text == "نامحدود" else int(text)
-                        else:
-                            update.message.reply_text("❌ لطفاً عدد یا 'نامحدود' وارد کنید!")
-                            return
-                    
-                    elif field == 'price':
-                        try:
-                            db["categories"][cat][plan_index][field] = int(text)
-                        except:
-                            update.message.reply_text("❌ لطفاً عدد وارد کنید!")
-                            return
-                    
-                    else:  # name, volume
-                        db["categories"][cat][plan_index][field] = text
-                    
-                    # ذخیره تغییرات
-                    save_db(db)
-                    
-                    # نمایش نتیجه
-                    p = db["categories"][cat][plan_index]
-                    users_display = p['users'] if p['users'] != "نامحدود" else "نامحدود"
-                    days_display = p['days'] if p['days'] != "نامحدود" else "نامحدود"
-                    
-                    result_msg = (
-                        f"✅ پلن با موفقیت ویرایش شد!\n\n"
-                        f"📌 دسته: {cat}\n"
-                        f"📝 نام: {p['name']}\n"
-                        f"📦 حجم: {p['volume']}\n"
-                        f"👥 کاربران: {users_display}\n"
-                        f"⏳ مدت: {days_display} روز\n"
-                        f"💰 قیمت: {p['price'] * 1000:,} تومان"
-                    )
-                    
-                    update.message.reply_text(result_msg, reply_markup=get_admin_menu())
-                    user_data[uid] = {}
-                    logger.info(f"✅ ویرایش {field} با موفقیت انجام شد")
-                    
-                except Exception as e:
-                    logger.error(f"❌ Error in edit_plan_enter_value: {e}")
-                    update.message.reply_text(f"❌ خطا: {e}")
-                    user_data[uid] = {}
-                return
+            # بخش‌های مربوط به ویرایش پلن به طور کامل حذف شدند
 
             if step == 'card_num':
                 if text.isdigit() and len(text) == 16:
@@ -1677,75 +1551,43 @@ def handle_cb(update, context):
         if query.data.startswith("del_"):
             if str(uid) == str(ADMIN_ID):
                 try:
+                    # استخراج شناسه پلن
                     parts = query.data.split("_")
-                    if len(parts) >= 2 and parts[1].isdigit():
-                        plan_id = int(parts[1])
-                        deleted = False
-                        delete_cat = ""
-                        delete_name = ""
-                        
-                        for cat, plans in db["categories"].items():
-                            for i, p in enumerate(plans):
-                                if p["id"] == plan_id:
-                                    delete_name = p['name']
-                                    delete_cat = cat
-                                    del plans[i]
-                                    deleted = True
+                    if len(parts) >= 2:
+                        plan_id_str = parts[1]
+                        if plan_id_str.isdigit():
+                            plan_id = int(plan_id_str)
+                            deleted = False
+                            delete_cat = ""
+                            delete_name = ""
+                            
+                            # جستجو در همه دسته‌ها
+                            for cat, plans in db["categories"].items():
+                                for i, p in enumerate(plans):
+                                    if p["id"] == plan_id:
+                                        delete_name = p['name']
+                                        delete_cat = cat
+                                        del plans[i]
+                                        deleted = True
+                                        break
+                                if deleted:
                                     break
+                            
                             if deleted:
-                                break
-                        
-                        if deleted:
-                            save_db(db)
-                            query.message.edit_text(f"✅ پلن '{delete_name}' از دسته '{delete_cat}' با موفقیت حذف شد.")
+                                save_db(db)
+                                query.message.edit_text(f"✅ پلن '{delete_name}' از دسته '{delete_cat}' با موفقیت حذف شد.")
+                            else:
+                                query.message.edit_text("❌ پلن مورد نظر یافت نشد.")
                         else:
-                            query.message.edit_text("❌ پلن یافت نشد.")
+                            query.message.edit_text("❌ شناسه پلن نامعتبر است.")
                     else:
-                        query.message.edit_text("❌ شناسه پلن نامعتبر است.")
+                        query.message.edit_text("❌ فرمت درخواست حذف نامعتبر است.")
                 except Exception as e:
                     logger.error(f"❌ Error in delete plan: {e}")
                     query.message.edit_text(f"❌ خطا در حذف پلن: {e}")
             return
 
-        # ========== بخش ویرایش پلن ==========
-        if query.data.startswith("edit_plan_"):
-            if str(uid) == str(ADMIN_ID):
-                try:
-                    plan_id = int(query.data.split("_")[2])
-                    
-                    for cat, plans in db["categories"].items():
-                        for i, p in enumerate(plans):
-                            if p["id"] == plan_id:
-                                # ذخیره اطلاعات در user_data
-                                user_data[uid] = {
-                                    'step': 'edit_plan_select_field',
-                                    'cat': cat,
-                                    'plan_index': i,
-                                    'plan_id': plan_id
-                                }
-                                
-                                keyboard = [
-                                    ['نام', 'حجم', 'کاربران'],
-                                    ['مدت', 'قیمت'],
-                                    ['🔙 برگشت']
-                                ]
-                                
-                                # پاک کردن پیام قبلی
-                                query.message.delete()
-                                
-                                # ارسال پیام جدید
-                                context.bot.send_message(
-                                    uid,
-                                    f"✏️ ویرایش پلن {p['name']}\nچه چیزی را ویرایش کنیم؟",
-                                    reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-                                )
-                                return
-                    
-                    query.message.edit_text("❌ پلن یافت نشد.")
-                except Exception as e:
-                    logger.error(f"❌ Error in edit_plan: {e}")
-                    query.message.edit_text(f"❌ خطا: {e}")
-            return
+        # بخش ویرایش پلن به طور کامل حذف شد
 
         if query.data.startswith("test_"):
             if str(uid) == str(ADMIN_ID):
