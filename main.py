@@ -1059,14 +1059,33 @@ def handle_msg(update, context):
             if step == 'new_cat' and text in db["categories"]:
                 user_data[uid]['cat'] = text
                 time_periods = db.get("time_periods", [30, 60, 90])
-                kb = [[str(p) + " روزه"] for p in time_periods] + [['🔙 برگشت']]
+                kb = []
+                for p in time_periods:
+                    if p == 30:
+                        kb.append(["۳۰ روزه (یک ماهه)"])
+                    elif p == 60:
+                        kb.append(["۶۰ روزه (دو ماهه)"])
+                    elif p == 90:
+                        kb.append(["۹۰ روزه (سه ماهه)"])
+                    else:
+                        kb.append([f"{p} روزه"])
+                kb.append(['🔙 برگشت'])
                 user_data[uid]['step'] = 'new_time'
                 update.message.reply_text("⏱️ بازه زمانی را انتخاب کنید:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
                 return
 
             if step == 'new_time':
                 try:
-                    days = int(text.replace(" روزه", ""))
+                    days = 0
+                    if "۳۰" in text or "یک ماهه" in text:
+                        days = 30
+                    elif "۶۰" in text or "دو ماهه" in text:
+                        days = 60
+                    elif "۹۰" in text or "سه ماهه" in text:
+                        days = 90
+                    else:
+                        days = int(text.replace(" روزه", "").split()[0])
+                    
                     user_data[uid]['days'] = days
                     user_data[uid]['step'] = 'new_name'
                     update.message.reply_text("📝 نام پلن را وارد کنید:", reply_markup=back_btn())
@@ -1136,7 +1155,7 @@ def handle_msg(update, context):
                     update.message.reply_text(f"❌ خطا: {e}")
                 return
 
-            # ========== بخش ویرایش پلن (کاملاً بازنویسی شده) ==========
+            # ========== بخش ویرایش پلن ==========
             if step == 'edit_plan_select_field':
                 logger.info(f"✏️ کاربر {uid} در مرحله انتخاب فیلد ویرایش")
                 try:
@@ -1343,7 +1362,13 @@ def handle_msg(update, context):
                 user_data[uid] = {}
                 return
 
+        # ========== بخش اصلاح شده برای مرحله wait_name ==========
         if step == 'wait_name':
+            if 'plan' not in user_data[uid]:
+                update.message.reply_text("❌ خطا: پلن انتخاب نشده است. دوباره تلاش کنید.", reply_markup=get_main_menu(uid))
+                user_data[uid] = {}
+                return
+                
             user_data[uid]['account'] = text
             p = user_data[uid]['plan']
             
@@ -1353,15 +1378,21 @@ def handle_msg(update, context):
                 users_text = "👥 نامحدود کاربر"
             days_text = "نامحدود" if p['days'] == "نامحدود" else f"{p['days']} روز"
             
-            msg = db["texts"]["payment_info"].format(
-                account=text,
-                plan_name=p['name'],
-                volume=p['volume'],
-                users_text=users_text,
-                days_text=days_text,
-                price=price_toman,
-                card_number=db['card']['number'],
-                card_name=db['card']['name']
+            msg = (
+                f"💳 پیش‌فاکتور خرید\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"👤 نام اکانت: {text}\n"
+                f"📦 پلن: {p['name']}\n"
+                f"📊 حجم: {p['volume']}\n"
+                f"👥 {users_text}\n"
+                f"⏳ مدت: {days_text}\n"
+                f"💰 مبلغ: {price_toman:,} تومان\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"💳 شماره کارت:\n"
+                f"<code>{db['card']['number']}</code>\n"
+                f"👤 {db['card']['name']}\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"پس از واریز، عکس فیش را بفرستید"
             )
             
             btn = InlineKeyboardMarkup([[
@@ -1423,7 +1454,15 @@ def handle_cb(update, context):
             
             keyboard = []
             for days in time_periods:
-                keyboard.append([InlineKeyboardButton(f"💰 {days} روزه", callback_data=f"subcat_{cat}_{days}")])
+                if days == 30:
+                    btn_text = f"💰 ۳۰ روزه (یک ماهه)"
+                elif days == 60:
+                    btn_text = f"💰 ۶۰ روزه (دو ماهه)"
+                elif days == 90:
+                    btn_text = f"💰 ۹۰ روزه (سه ماهه)"
+                else:
+                    btn_text = f"💰 {days} روزه"
+                keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"subcat_{cat}_{days}")])
             
             keyboard.append([InlineKeyboardButton(db["texts"]["back_button"], callback_data="back_to_categories")])
             query.message.edit_text(f"📦 {cat}\nلطفاً مدت زمان مورد نظر را انتخاب کنید:", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -1445,10 +1484,8 @@ def handle_cb(update, context):
             keyboard = []
             for p in plans:
                 price_toman = p['price'] * 1000
-                # فقط اسم و قیمت (بدون حجم)
-                plan_name = p['name']
-                # اگه اسم شامل GB هست، همونو نگه دار
-                btn_text = f"{plan_name} - {price_toman:,} تومان"
+                # فقط اسم و قیمت
+                btn_text = f"{p['name']} - {price_toman:,} تومان"
                 keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"buy_{p['id']}")])
             
             keyboard.append([InlineKeyboardButton(db["texts"]["back_button"], callback_data=f"cat_{cat}")])
@@ -1636,29 +1673,41 @@ def handle_cb(update, context):
                     query.message.edit_text(f"❌ خطا: {e}")
             return
 
+        # ========== بخش اصلاح شده برای حذف پلن ==========
         if query.data.startswith("del_"):
             if str(uid) == str(ADMIN_ID):
                 try:
-                    plan_id = int(query.data.split("_")[1])
-                    deleted = False
-                    for cat, plans in db["categories"].items():
-                        for i, p in enumerate(plans):
-                            if p["id"] == plan_id:
-                                del plans[i]
-                                deleted = True
+                    parts = query.data.split("_")
+                    if len(parts) >= 2 and parts[1].isdigit():
+                        plan_id = int(parts[1])
+                        deleted = False
+                        delete_cat = ""
+                        delete_name = ""
+                        
+                        for cat, plans in db["categories"].items():
+                            for i, p in enumerate(plans):
+                                if p["id"] == plan_id:
+                                    delete_name = p['name']
+                                    delete_cat = cat
+                                    del plans[i]
+                                    deleted = True
+                                    break
+                            if deleted:
                                 break
+                        
                         if deleted:
-                            break
-                    if deleted:
-                        save_db(db)
-                        query.message.edit_text("✅ پلن با موفقیت حذف شد.")
+                            save_db(db)
+                            query.message.edit_text(f"✅ پلن '{delete_name}' از دسته '{delete_cat}' با موفقیت حذف شد.")
+                        else:
+                            query.message.edit_text("❌ پلن یافت نشد.")
                     else:
-                        query.message.edit_text("❌ پلن یافت نشد.")
+                        query.message.edit_text("❌ شناسه پلن نامعتبر است.")
                 except Exception as e:
-                    query.message.edit_text(f"❌ خطا: {e}")
+                    logger.error(f"❌ Error in delete plan: {e}")
+                    query.message.edit_text(f"❌ خطا در حذف پلن: {e}")
             return
 
-        # ========== بخش ویرایش پلن (کاملاً بازنویسی شده) ==========
+        # ========== بخش ویرایش پلن ==========
         if query.data.startswith("edit_plan_"):
             if str(uid) == str(ADMIN_ID):
                 try:
@@ -1694,6 +1743,7 @@ def handle_cb(update, context):
                     
                     query.message.edit_text("❌ پلن یافت نشد.")
                 except Exception as e:
+                    logger.error(f"❌ Error in edit_plan: {e}")
                     query.message.edit_text(f"❌ خطا: {e}")
             return
 
